@@ -1,0 +1,11 @@
+name: sat-coverage
+channels:
+  - defaults
+dependencies:
+  - requests
+  - orekit
+  - shapely
+  - yaml
+  - pyyaml
+  - astropy
+  - isodate
