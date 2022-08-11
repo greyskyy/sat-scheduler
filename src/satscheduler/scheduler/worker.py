@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-from folium import Map, PolyLine
-from matplotlib import fontconfig_pattern
+from folium import Map
 from .linebuilder import LineBuilder
 from orekithelpers import referenceEllipsoid
 from .nadirtrace import NadirTrace
@@ -10,16 +9,12 @@ from schedule.payload_activity import PayloadActivityBuilder, PayloadActivity
 
 from org.hipparchus.ode.events import Action
 from org.hipparchus.util import FastMath
-from org.orekit.bodies import OneAxisEllipsoid, GeodeticPoint
 from org.orekit.data import DataContext
-from org.orekit.frames import Transform, StaticTransform
 from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.time import AbsoluteDate
 from satellite import Satellite
-from org.orekit.propagation import SpacecraftState
-from org.orekit.geometry.fov import FieldOfView
 
-from org.orekit.propagation.events import LongitudeCrossingDetector, FootprintOverlapDetector
+from org.orekit.propagation.events import LongitudeCrossingDetector, FootprintOverlapDetector, GeographicZoneDetector
 from org.orekit.propagation.events.handlers import PythonEventHandler
 
 from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
@@ -27,7 +22,6 @@ from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
 import isodate
 import numpy as np
 
-import java
 #import logging
 
 @dataclass
@@ -59,8 +53,12 @@ class LongitudeWrapHandler(PythonEventHandler):
         pass
     
     def eventOccurred(self, s, detector, increasing):
-        self.__tracer.addStateAndNewline(s)
-        return Action.CONTINUE
+        try:
+            self.__tracer.addStateAndNewline(s)
+            return Action.CONTINUE
+        except BaseException as e:
+            print(f"caught exception in longitude handler: {e}")
+            raise e
 
 '''
 class OrbitHandler(PythonEventHandler):
@@ -96,13 +94,17 @@ class AoiHandler(PythonEventHandler):
         pass
     
     def eventOccurred(self, s, detector, increasing):
-        if increasing:
-            print(f"exiting {self.__id} at: {s.getDate()}")
-            self.__builder.stopActivity(s)
-        else:
-            print(f"entering {self.__id} at {s.getDate()}")
-            self.__builder.startActivity(s)
-        return Action.CONTINUE
+        try:
+            if increasing:
+                print(f"exiting {self.__id} at: {s.getDate()}")
+                self.__builder.stopActivity(s)
+            else:
+                print(f"entering {self.__id} at {s.getDate()}")
+                self.__builder.startActivity(s)
+            return Action.CONTINUE
+        except BaseException as e:
+            print(f"Caught exception {e}")
+            raise e
 
 def schedule(item:WorkItem, centralBody:ReferenceEllipsoid=None, context:DataContext=None, step:str="PT10M"):
     """Execute a schedule work item.
@@ -145,14 +147,16 @@ def schedule(item:WorkItem, centralBody:ReferenceEllipsoid=None, context:DataCon
     activityBuilder = PayloadActivityBuilder(fov, centralBody)
     
     # register aoi detectors
-    idx = 0
-    zones = list(item.aoi.zones)
-    zones.reverse()
-    for zone in zones:
-        print(f"registring for aoi {idx + 1} / {len(zones)}")
-        print(f"zone size {zone.getSize()} {zone.getBoundarySize()}")
-        propagator.addEventDetector(FootprintOverlapDetector(fov, centralBody, zone, 10000.).withHandler(AoiHandler(f"zone{idx}", activityBuilder)))
-        idx = idx + 1
+    for aoi in item.aoi.aois:
+        print(f"registring for aoi: {aoi.id}")
+        if aoi.size < 500:
+            propagator.addEventDetector(FootprintOverlapDetector(fov, centralBody, aoi.zone, 10000.).withHandler(AoiHandler(aoi.id, activityBuilder)))
+        else:
+            print(f"simplifying complex aoi {aoi.id} (boundarySize={aoi.size})")
+            simplified = aoi.simplify()
+            print(f"simplifed aoi {aoi.id} (origBoundarySize={aoi.size}, simplifiedSize={simplified.size}")
+            
+            propagator.addEventDetector(FootprintOverlapDetector(fov, centralBody, simplified.zone, 10000.).withHandler(AoiHandler(aoi.id, activityBuilder)))
         
     print("computing prop time")
     # do the work
@@ -163,36 +167,16 @@ def schedule(item:WorkItem, centralBody:ReferenceEllipsoid=None, context:DataCon
     while elapsed <= propTime:
         t = item.start.shiftedBy(elapsed)
         try:
-            print(f"propagating to {t}")
             state = propagator.propagate(t)
-            print("propagation complete, adding nadir trace")
             nadirTracer.addState(state)
             
             if activityBuilder.isInActivity:
-                print("adding activity state")
                 activityBuilder.addState(state)
             
-            print(f"here at {state.getDate()}")
-            
-            #from state frame to earth frame
-            #stateToEarth = state.getFrame().getTransformTo(centralBody.getBodyFrame(), t)
-            #from spacecraft body to state frame
-            #bodyToState = state.toTransform().getInverse()
-            #from fov frame to spacecraft body frame
-            #fovToBody = fovToBodyTxProv.getTransform(t)
-            #fov to earth
-            #fovToEarth = Transform(t, fovToBody, Transform(t, bodyToState, stateToEarth))
-            
-            #footprint = fov.getFootprint(fovToEarth, centralBody, FastMath.toRadians(1.))
-            #for ring in list(footprint):
-            #    for l in java.util.List.cast_(ring):
-            #        loc = GeodeticPoint.cast_(l)
-            #        points.append((FastMath.toDegrees(loc.getLongitude()), FastMath.toDegrees(loc.getLatitude())))
-            
             elapsed += stepSeconds
-        except:
-            print(f"Caught exception processing sat {item.sat.id} at time {t}")
-            raise
+        except BaseException as e:
+            print(f"Caught exception processing sat {item.sat.id} at time {t}: {e}")
+            raise e
     
     nadirLine.finished()
     if not 'show' in item.sat.groundTraceConfig or item.sat.groundTraceConfig['show']:

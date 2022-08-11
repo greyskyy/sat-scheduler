@@ -75,12 +75,14 @@ class PayloadActivityBuilder:
         self.__activities = []
         self.__currentStart = None
         self.__currentPoints = []
+        self.__currentCount = 0
     
     def startActivity(self, state:SpacecraftState):
         if self.__currentStart is None:
             self.__currentStart = state.getDate()
-            
+        
         self.addState(state)
+        self.__currentCount = self.__currentCount + 1
     
     def addState(self, state:SpacecraftState):
         if self.__currentStart is None:
@@ -104,6 +106,11 @@ class PayloadActivityBuilder:
             
     def stopActivity(self, state:SpacecraftState):
         self.addState(state)
+        
+        # decrement the stack, avoid closing unless we closed the last aoi
+        self.__currentCount = self.__currentCount - 1
+        if self.__currentCount:
+            return
         
         try:
             array = np.array(self.__currentPoints)

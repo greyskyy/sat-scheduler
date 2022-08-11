@@ -6,6 +6,7 @@ if __name__ == '__main__':
     orekit.initVM()
     
 from argparse import ArgumentError
+from dataclasses import dataclass
 from dataloader import download
 
 import shapely.geometry
@@ -16,6 +17,66 @@ from org.hipparchus.geometry.spherical.twod import SphericalPolygonsSet
 from org.hipparchus.util import FastMath
 from org.orekit.models.earth.tessellation import EllipsoidTessellator
 from org.orekit.bodies import GeodeticPoint
+
+def _toZone(polygon:Polygon) -> SphericalPolygonsSet:
+    points = []
+    for p in polygon.boundary.coords:
+        points.append(GeodeticPoint(FastMath.toRadians(p[1]), FastMath.toRadians(p[0]), 0.)) # put lon,lat into lat,lon order
+    
+    return EllipsoidTessellator.buildSimpleZone(float(1.0e-10), points)
+
+class Aoi:
+    
+    def __init__(self,
+            id:str,
+            polygon:Polygon,
+            zone: SphericalPolygonsSet,
+            simplifed:bool = False):
+        self.__id = id
+        self.__polygon = polygon
+        self.__zone = zone
+        self.__simplifed = simplifed
+    
+    @property
+    def id(self) -> str:
+        return self.__id
+    
+    @property
+    def polygon(self) -> Polygon:
+        return self.__polygon
+    
+    @property
+    def zone(self) -> SphericalPolygonsSet:
+        return self.__zone
+    
+    @property
+    def size(self) -> int:
+        """The number of points in the AOI."""
+        return len(self.__polygon.boundary.coords)
+    
+    def simplify(self, maxSize:int=500):
+        """Simplify the aoi into one with fewer verticies
+
+        Returns:
+            _type_: _description_
+        """
+        
+        # convert the polygon to a distance-preserving shape
+        gs = geopandas.GeoSeries(data = self.__polygon, crs="+proj=longlat +datum=WGS84 +no_defs")
+        gs = gs.to_crs("+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs")
+        
+        gs = gs.simplify(10000)
+        gs = gs.to_crs("+proj=longlat +datum=WGS84 +no_defs")
+        poly = shapely.geometry.polygon.orient(gs.item())
+        
+        if len(poly.boundary.coords) > maxSize:
+            print("simplifed shape was too big, simplifying using convex hull")
+            poly = shapely.geometry.polygon.orient(Polygon(shell = self.__polygon.boundary.convex_hull))
+            
+        zone = _toZone(poly)
+        
+        return Aoi(self.id, poly, zone, True)
+        
 
 class AoiCollection:
     """
@@ -36,7 +97,9 @@ class AoiCollection:
         self.sourceUrl = sourceUrl
         self.__geojson = None
         self.__gdf = None
+        self.__polygons = None
         self.__bbox = bbox
+        self.__aois = None
     
     @property
     def sourceUrl(self) -> str:
@@ -105,6 +168,10 @@ class AoiCollection:
         """
         return self.__zones
     
+    @property
+    def aois(self) -> list[Aoi]:
+        return self.__aois
+    
     def load(self):
         """
         Load the data from the `sourceUrl` property.
@@ -140,28 +207,27 @@ class AoiCollection:
             gdf = gdf.intersection(box)
         
         # extract only the polygon shells, ignore any holes
+        aois = []
+        idx=0
         polys=[]
         for g in gdf.geometry:
             for p in g.geoms:
-                polys.append(Polygon(shell=p.exterior))
+                ccw = shapely.geometry.polygon.orient(Polygon(shell=p.exterior))
+                polys.append(ccw)
                 
+                zone = _toZone(ccw)
+                idx = idx + 1
+                
+                id = f"target{idx}"
+                
+                aois.append(Aoi(id=id, polygon=ccw, zone=zone))
+
         gdf = geopandas.GeoDataFrame(geometry=polys)
-        
-        zones = []
-        for g in gdf.geometry:
-            ccw = shapely.geometry.polygon.orient(g)
-            points = []
-            for p in ccw.boundary.coords:
-                points.append(GeodeticPoint(FastMath.toRadians(p[1]), FastMath.toRadians(p[0]), 0.)) # put lon,lat into lat,lon order
-            
-            print(f"aoi with {len(points)}")
-            zone = EllipsoidTessellator.buildSimpleZone(float(1.0e-10), points)
-            zones.append(zone)
-                
+    
         # save the data frame and geojson
         self.__gdf = gdf
-        self.__zones = zones
         self.__geojson = gdf.to_json()
+        self.__aois = aois
     
     def unload(self):
         """
