@@ -48,7 +48,15 @@ satellites:
       #v:
       # mean anomaly
       m: 257.7333 deg
-    lof: lvlh
+    lof: qsw
+    attitudes:
+      - name: mission
+        type: LofOffset
+        lof: qsw
+        default: true
+        tx: # transform from LOF
+          x: [-1., 0., 0.] # +x_body toward nadir
+          z: [0., 1., 0.]  # +z_body toward velocity
     sensors:
       - id: camera
         type: camera
@@ -57,9 +65,10 @@ satellites:
         imgPeriod: 22 Hz
         cols: 1024
         rows: 768
+        rowsAlongX: true #when true rows are along the paylod frame's X axis, when false they align to the Y axis
         frame:
           translation: [0., 0., 0.]
-          z: [-1, 0, 0]
+          z: [1, 0, 0]
           x: [0, 1, 0]
       
 earth:

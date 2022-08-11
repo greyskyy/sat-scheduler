@@ -143,7 +143,7 @@ def main():
     sats = loadSatellites(config)
     workers = []
     for s in sats:
-        work = WorkItem(start=start, stop=stop, sat=s, map=map)
+        work = WorkItem(start=start, stop=stop, sat=s, map=map, aoi=countries)
         thread = Thread(target=doWork, kwargs={'workItem':work, 'context':context, 'earth':earth, **(config['control'])})
         thread.start()
         workers.append(thread)

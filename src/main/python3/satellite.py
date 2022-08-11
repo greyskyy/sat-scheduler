@@ -2,16 +2,25 @@ if '__main__' == __name__:
     import orekit
     orekit.initVM()
 
-from asyncio import CancelledError
+from argparse import ArgumentError
+import astropy.units as u
+from astropy.units import Quantity
 from dataclasses import dataclass
 from requests import get
 
-from orekithelpers import toVector, toRotation, FixedTransformProvider
+from orekithelpers import toVector, toRotation, FixedTransformProvider, referenceEllipsoid
 
 from propagator import buildOrbit, buildTle, buildPropagator
 
+from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D, RotationConvention, RotationOrder
+
+from org.orekit.attitudes import AttitudeProvider, LofOffset, NadirPointing, YawCompensation
+from org.orekit.bodies import BodyShape
 from org.orekit.data import DataContext
-from org.orekit.frames import Frame, Transform, TransformProvider, TransformProviderUtils
+from org.orekit.frames import Frame, LOFType, StaticTransform, TransformProvider, TransformProviderUtils
+
+from org.orekit.geometry.fov import DoubleDihedraFieldOfView, FieldOfView
+from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.propagation import Propagator
 from org.orekit.time import AbsoluteDate
 
@@ -32,12 +41,16 @@ class CameraSensorData:
     cols:int
     rows:int
     frame:dict
+    rowsAlongX:bool
 
 class CameraSensor:
     
     def __init__(self, data:CameraSensorData):
         self.__data = data
         self.__bodyToSensor = None
+        
+        self.__hfov = data.rows * Quantity(data.pitch).si / Quantity(data.focalLength).si * u.rad
+        self.__vfov = data.cols * Quantity(data.pitch).si / Quantity(data.focalLength).si * u.rad
         
         if not data.frame is None:
             fdata = FrameData(**(data.frame))
@@ -51,8 +64,46 @@ class CameraSensor:
     @property
     def bodyToSensorTxProv(self) -> TransformProvider:
         return self.__bodyToSensor
-            
-
+    
+    @property
+    def sensorToBodyTxProv(self) -> TransformProvider:
+        return TransformProviderUtils.getReversedProvider(self.bodyToSensorTxProv)
+    
+    @property
+    def hFov(self):
+        return self.__hfov
+    
+    @property
+    def vFov(self):
+        return self.__vfov
+    
+    def createFov(self, angularMargin:float=1.0e-6) -> FieldOfView:
+        return self._createFovInFrame(StaticTransform.getIdentity(), angularMargin=angularMargin)
+        tx = self.sensorToBodyTxProv.getStaticTransform(AbsoluteDate.ARBITRARY_EPOCH)
+        center = Vector3D.PLUS_K
+        if self.__data.rowsAlongX:
+            axis1 = Vector3D.PLUS_I
+            axis2 = Vector3D.PLUS_J
+        else:
+            axis1 = Vector3D.PLUS_J
+            axis2 = Vector3D.PLUS_I
+        
+        return FieldOfView.cast_(DoubleDihedraFieldOfView(center, axis1, float(self.hFov.value / 2.), axis2, float(self.vFov.value / 2.), angularMargin))
+    
+    def createFovInBodyFrame(self, angularMargin:float=1.0e-6) -> FieldOfView:
+        tx = self.sensorToBodyTxProv.getStaticTransform(AbsoluteDate.ARBITRARY_EPOCH)
+        return self._createFovInFrame(tx, angularMargin=angularMargin)
+    
+    def _createFovInFrame(self, tx:StaticTransform, angularMargin:float=1.0e-6):
+        center = tx.transformVector(Vector3D.PLUS_K)
+        if self.__data.rowsAlongX:
+            axis1 = tx.transformVector(Vector3D.PLUS_I)
+            axis2 = tx.transformVector(Vector3D.PLUS_J)
+        else:
+            axis1 = tx.transformVector(Vector3D.PLUS_J)
+            axis2 = tx.transformVector(Vector3D.PLUS_I)
+        return FieldOfView.cast_(DoubleDihedraFieldOfView(center, axis1, float(self.hFov.value / 2.), axis2, float(self.vFov.value / 2.), angularMargin))
+    
 class Satellite:
     """
     Data object representing a single satellite
@@ -63,7 +114,8 @@ class Satellite:
         self.__name = config['name']
         self.__propagator = None
         self.__inertialFrame = None
-        self.__sensors=[]
+        self.__sensors = []
+        self.__attitudes = {}
         
         if 'sensors' in config:
             for s in config['sensors']:
@@ -131,15 +183,31 @@ class Satellite:
         return self.__propagator
     
     @property
+    def lofType(self) -> LOFType:
+        typeStr = self.__config['lof'] if 'lof' in self.__config else 'lvlh'
+        
+        typeStr = typeStr.upper()
+        return LOFType.valueOf(typeStr)
+        
+    @property
     def sensorCount(self) -> int:
         return len(self.__sensors)
     
     def getSensor(self, idx:int=0) -> CameraSensor:
         return self.__sensors[idx]
+
+    def getAttitudeProvider(self, name:str=None) -> AttitudeProvider:
+        if name is None:
+            return self.__attitudes[self.__defaultAtLaw]
+        
+        return self.__attitudes[name]
     
-    def init(self, context:DataContext=None):
+    def init(self, context:DataContext=None, earth:ReferenceEllipsoid=None):
         if context is None:
             context = DataContext.getDefault()
+        
+        if earth is None:
+            earth = referenceEllipsoid()
         
         # Build the propagator
         if 'catnr' in self.__config:
@@ -153,19 +221,66 @@ class Satellite:
             
             data = r.content.splitlines()
             tle = buildTle(line1=data[1], line2=data[2], context=context)
-            self.__propagator = buildPropagator(tle, mass=self.mass, context=context)
+            self._initAttitudes(context.getFrames().getTEME(), context, earth)
+            atProv = self.getAttitudeProvider('mission')
+            self.__propagator = buildPropagator(tle, mass=self.mass, context=context, attitudeProvider=atProv)
         elif 'tle' in self.__config:
             tle = buildTle(**(self.__config['tle']), context=context)
-            self.__propagator = buildPropagator(tle, mass=self.mass, context=context)
+            self._initAttitudes(context.getFrames().getTEME(), context, earth)
+            atProv = self.getAttitudeProvider('mission')
+            self.__propagator = buildPropagator(tle, mass=self.mass, context=context, attitudeProvider=atProv)
         elif 'keplerian' in self.__config:
             orbit = buildOrbit(**(self.__config['keplerian']), context=context)
-            print(orbit)
-            self.__propagator = buildPropagator(orbit, mass=self.mass, context=context, **(self.__config))
+            self._initAttitudes(orbit.getFrame(), context, earth)
+            atProv = self.getAttitudeProvider('mission')
+            self.__propagator = buildPropagator(orbit, mass=self.mass, context=context, attitudeProvider=atProv, **(self.__config))
         else:
             raise ValueError(f"cannot build propagator for satellite {self.id}")
         
         # inertial frame from the propagator
         self.__inertialFrame = self.__propagator.getFrame()
+    
+    def _initAttitudes(self, frame:Frame=None, context:DataContext=None, earth:ReferenceEllipsoid=None):
+        if context is None:
+            context = DataContext.getDefault()
+            
+        if frame is None:
+            frame = context.getFrames().getGCRF()
+        
+        self.__attitudes = {}
+        self.__defaultAtLaw = None
+        if 'attitudes' in self.__config:
+            for item in self.__config['attitudes']:
+                name = item['name']
+                type = item['type'] if 'type' in item else 'LofOffset'
+                
+                if 'default' in item and item['default']:
+                    self.__defaultAtLaw = name
+                
+                if 'LofOffset' == type:
+                    self.__attitudes[name] = self._buildLofOffsetProvider(item, frame)
+                else:
+                    raise ValueError(f"Unknown attitude type [{type}] specified in config")
+        
+        if self.__defaultAtLaw is None and self.__attitudes:
+            self.__defaultAtLaw = list(self.__attitudes.keys())[0]
+    
+    def _buildLofOffsetProvider(self, data:dict, frame:Frame) -> AttitudeProvider:
+        if 'lof' in data:
+            lofType = LOFType.valueOf(data['lof'].upper())
+        else:
+            lofType = self.lofType
+        
+        if 'tx' in data:
+            x = toVector(data['tx']['x']) if 'x' in data['tx'] else None
+            y = toVector(data['tx']['y']) if 'y' in data['tx'] else None
+            z = toVector(data['tx']['z']) if 'z' in data['tx'] else None
+            rot = toRotation(x, y, z)
+        else:
+            rot = Rotation.IDENTITY
+        
+        angles = rot.getAngles(RotationOrder.XYZ, RotationConvention.FRAME_TRANSFORM)
+        return LofOffset(frame, lofType, RotationOrder.XYZ, angles[0], angles[1], angles[2])
 
 if '__main__' == __name__:
     import yaml
@@ -177,9 +292,13 @@ if '__main__' == __name__:
     
     if 'satellites' in config and not config['satellites'] == None:
         for key, value in config['satellites'].items():
-            s = Satellite(key, value)
+            if 'filter' in value and value['filter']:
+                continue
             
-            if s.sensorCount > 0:
-                print(s.id)
-                print(s.getSensor().bodyToSensorTxProv.getTransform(AbsoluteDate.ARBITRARY_EPOCH).getInverse().transformVector(Vector3D.PLUS_J))
+            print(f"initializing {key}")
+            s = Satellite(key, value)
+            s.init()
+            
+            print(f"initialized {key}")
+            
             

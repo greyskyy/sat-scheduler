@@ -2,10 +2,10 @@
 from functools import singledispatch
 from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
 from org.orekit.data import DataContext
-from org.orekit.frames import Frame, Transform, PythonTransformProvider
+from org.orekit.frames import Frame, StaticTransform, Transform, PythonTransformProvider
 from org.orekit.models.earth import ReferenceEllipsoid
-from org.orekit.utils import Constants, IERSConventions
-from org.orekit.time import AbsoluteDate, FieldAbsoluteDate
+from org.orekit.utils import IERSConventions
+from org.orekit.time import AbsoluteDate
 
 def loadIersConventions(s:str, default:str=None) -> IERSConventions:
     """Convert a string to an iers convetions
@@ -120,11 +120,17 @@ def toRotation(x:Vector3D=None, y:Vector3D=None, z:Vector3D=None) -> Rotation:
         return Rotation.IDENTITY
 
 class FixedTransformProvider(PythonTransformProvider):
-    
+    """Transform provider for a fixed transformation, regardless of time called.
+
+    Args:
+        tx (Vector3D, Optional): translation from the parent to this frame. Defaults to `[0, 0, 0]`
+        r (Rotation, Optional): rotation from the parent to this frame. Defaults to identity rotation.
+    """
     def __init__(self, tx:Vector3D=None, r:Rotation=None):
+        super().__init__()
         self.__tx = tx
         self.__r = r
-        
+    
     def getTransform(self, date:AbsoluteDate) -> Transform:
         # translation is unspecified
         if self.__tx is None:
@@ -139,11 +145,11 @@ class FixedTransformProvider(PythonTransformProvider):
             # both translation and rotation are specified
             if not self.__r is None:
                 tx = Transform(date, self.__tx)
-                rot = Transform(date, self.__r)
-                
-                return Transform(date, tx, rot)
+                r = Transform(date, self.__r)
+                return Transform(date, tx, r)
             # only translation
             else:
+                #return Transform.cast_(StaticTransform.of(date, self.__tx))
                 return Transform(date, self.__tx)
     
     def getTransform_F(self, date):

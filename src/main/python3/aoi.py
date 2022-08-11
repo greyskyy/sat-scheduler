@@ -1,7 +1,10 @@
 '''
 Container to load and manage AOIs within the 
 '''
-
+if __name__ == '__main__':
+    import orekit
+    orekit.initVM()
+    
 from argparse import ArgumentError
 from dataloader import download
 
@@ -9,6 +12,10 @@ import shapely.geometry
 from shapely.geometry import Polygon
 import geopandas
 
+from org.hipparchus.geometry.spherical.twod import SphericalPolygonsSet
+from org.hipparchus.util import FastMath
+from org.orekit.models.earth.tessellation import EllipsoidTessellator
+from org.orekit.bodies import GeodeticPoint
 
 class AoiCollection:
     """
@@ -42,7 +49,7 @@ class AoiCollection:
             bbox (tuple, optional): 4-tuple of the geographic bounding box. Must be specified as `[lon1, lat1, lon2, lat2]`. Defaults to None.
         """
         
-        self.sourceUrl = 'https://datahub.io/core/geo-countries/r/countries.geojson'
+        self.sourceUrl = sourceUrl
         self.__geojson = None
         self.__gdf = None
         self.__bbox = bbox
@@ -105,6 +112,15 @@ class AoiCollection:
         """
         return self.__gdf
     
+    @property
+    def zones(self) -> list[SphericalPolygonsSet]:
+        """The set of AOI borders, as sphericalpolygonsset instances
+
+        Returns:
+            list[SphericalPolygonsSet]: the list of aoi boundaries
+        """
+        return self.__zones
+    
     def load(self):
         """
         Load the data from the `sourceUrl` property.
@@ -147,8 +163,19 @@ class AoiCollection:
                 
         gdf = geopandas.GeoDataFrame(geometry=polys)
         
+        zones = []
+        for g in gdf.geometry:
+            ccw = shapely.geometry.polygon.orient(g)
+            points = []
+            for p in ccw.boundary.coords:
+                points.append(GeodeticPoint(FastMath.toRadians(p[1]), FastMath.toRadians(p[0]), 0.)) # put lon,lat into lat,lon order
+            
+            zone = EllipsoidTessellator.buildSimpleZone(float(1.0e-10), points)
+            zones.append(zone)
+                
         # save the data frame and geojson
         self.__gdf = gdf
+        self.__zones = zones
         self.__geojson = gdf.to_json()
     
     def unload(self):
@@ -160,11 +187,12 @@ class AoiCollection:
 
 if __name__ == '__main__':
     import folium
+    
     countries = AoiCollection(bbox=(-85, -60, -33, 13))
     countries.load()
     
-    map = folium.Map()
-    folium.GeoJson(data=countries.geoJson).add_to(map)
+    #map = folium.Map()
+    #folium.GeoJson(data=countries.geoJson).add_to(map)
     
-    map.save('test.html')
+    #map.save('test.html')
     
