@@ -7,6 +7,7 @@ from typing import Any
 import folium
 import orekit
 import yaml
+#import logging
 
 from aoi import AoiCollection
 from satellite import Satellite
@@ -18,10 +19,7 @@ from org.orekit.data import DataContext
 from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.time import AbsoluteDate, DateTimeComponents
 from threading import Thread
-from worker import WorkItem, execute
-
-# initialize the orekit java vm
-vm = orekit.initVM()
+from scheduler import WorkItem, schedule
 
 def parseArgs() -> tuple[argparse.Namespace, dict]:
     """Parse commandline arguments
@@ -106,7 +104,7 @@ def timespan(config:dict, context:DataContext=None) -> tuple[AbsoluteDate,Absolu
     return (AbsoluteDate(DateTimeComponents.parseDateTime(t0), context.getTimeScales().getUTC()),
             AbsoluteDate(DateTimeComponents.parseDateTime(t1), context.getTimeScales().getUTC()))
 
-def doWork(workItem:WorkItem, earth:ReferenceEllipsoid=None, context:DataContext=None, **kwargs):
+def doWork(vm, workItem:WorkItem, earth:ReferenceEllipsoid=None, context:DataContext=None, **kwargs):
     """
     Thread target. Attaches the thread to the orekit VM before executing the actual propagation work
 
@@ -114,10 +112,10 @@ def doWork(workItem:WorkItem, earth:ReferenceEllipsoid=None, context:DataContext
         workItem (WorkItem): The item of work
     """
     vm.attachCurrentThread() # do this before any orekit in a background thread
-    execute(item=workItem, centralBody=earth, context=context, **kwargs)
+    schedule(item=workItem, centralBody=earth, context=context, **kwargs)
 
 # Main function
-def main():
+def runApp(vm):
     """
     Main function
     """
@@ -144,7 +142,7 @@ def main():
     workers = []
     for s in sats:
         work = WorkItem(start=start, stop=stop, sat=s, map=map, aoi=countries)
-        thread = Thread(target=doWork, kwargs={'workItem':work, 'context':context, 'earth':earth, **(config['control'])})
+        thread = Thread(target=doWork, kwargs={'vm':vm, 'workItem':work, 'context':context, 'earth':earth, **(config['control'])})
         thread.start()
         workers.append(thread)
     
@@ -152,6 +150,3 @@ def main():
         t.join()
         
     saveMap(map, filename=args.output)
-
-if __name__ in "__main__":
-    main()

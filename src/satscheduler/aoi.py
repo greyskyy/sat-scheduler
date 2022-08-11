@@ -22,22 +22,6 @@ class AoiCollection:
     Collection of relevant AOIs to use in this run.
     
     Data is loaded as GeoJSON and can be filtered after loading.
-    
-    Attibutes
-    ---------
-    sourceUrl : str
-        The url from which the source data will be loaded.
-    isLoaded : bool
-        `True` when the data has been loaded, `False` otherwise
-    bbox : tuple
-        A 4-tuple specifying a bounding box
-    
-    Methods
-    -------
-    load()
-        Loads the data from the `sourceUrl` property. Repeated calls will have no effect until `unload()` is called.
-    unload()
-        Remove the loaded data, enabled reloading by calling `load()` a second time.
     """
     
     def __init__(self, sourceUrl='https://datahub.io/core/geo-countries/r/countries.geojson', bbox:tuple[float, float, float, float]=None):
@@ -158,7 +142,7 @@ class AoiCollection:
         # extract only the polygon shells, ignore any holes
         polys=[]
         for g in gdf.geometry:
-            for p in g:
+            for p in g.geoms:
                 polys.append(Polygon(shell=p.exterior))
                 
         gdf = geopandas.GeoDataFrame(geometry=polys)
@@ -170,6 +154,7 @@ class AoiCollection:
             for p in ccw.boundary.coords:
                 points.append(GeodeticPoint(FastMath.toRadians(p[1]), FastMath.toRadians(p[0]), 0.)) # put lon,lat into lat,lon order
             
+            print(f"aoi with {len(points)}")
             zone = EllipsoidTessellator.buildSimpleZone(float(1.0e-10), points)
             zones.append(zone)
                 

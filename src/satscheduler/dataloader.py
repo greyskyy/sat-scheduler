@@ -23,7 +23,7 @@ def download(url:str, chunk_size=128) -> str:
         str: The path to the downloaded file on the file system.
     """
     name = basename(url)
-    dest = join(sys.path[0], '../../../', dataDir, name)
+    dest = join(sys.path[0], '../../', dataDir, name)
     
     if exists(dest):
         return dest

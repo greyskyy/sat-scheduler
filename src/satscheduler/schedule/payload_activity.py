@@ -14,30 +14,49 @@ from shapely.geometry.polygon import Polygon
 
 from folium import Map, Polygon as MapPolygon
 
-import alphashape
+#import alphashape
 import numpy as np
 
 ANGULAR_STEP_DEGREES = 5.
 
 class PayloadActivity:
+    """Single payload activity operation."""
     def __init__(self, start:AbsoluteDate, stop:AbsoluteDate, footprint:Polygon=None):
+        """Class constructor.
+
+        Args:
+            start (AbsoluteDate): Payload activity start time
+            stop (AbsoluteDate): Payload activity stop time
+            footprint (Polygon, optional): Footprint of the sensor during the activity. Defaults to None.
+        """
         self.__start = start
         self.__stop = stop
         self.__footprint = footprint
     
     @property
     def start(self) -> AbsoluteDate:
+        """Activity start time."""
         return self.__start
     
     @property
     def stop(self) -> AbsoluteDate:
+        """Activity stop time."""
         return self.__stop
 
     @property
     def footprint(self) -> Polygon:
+        """Ground footprint of the sensor during the collection"""
         return self.__footprint
     
-    def add_to(self, map, **kwargs):
+    def add_to(self, map:Map, **kwargs):
+        """Add the sensor footprint to the provided map.
+        
+        Other arguments are passed to the shapely.geometry.polygon.Polygon constructor
+        and should include any display-related configuration.
+
+        Args:
+            map (Map): The map to which this footprint should be added.
+        """
         mapArgs = []
         for p in self.__footprint.exterior.coords:
             mapArgs.append((p[1], p[0])) #shapely polygon is lon,lat but map polygon is lat,lon
@@ -45,7 +64,11 @@ class PayloadActivity:
         MapPolygon(mapArgs, **kwargs).add_to(map)        
 
 class PayloadActivityBuilder:
+    """Generator used to build payload activities based on various spacecraft states.
     
+    It is expected this class will be used during propagation, building out a series of payload activities
+    based on various EventDetector events.
+    """
     def __init__(self, fov:FieldOfView, earth:OneAxisEllipsoid):
         self.__fov = fov
         self.__earth = earth

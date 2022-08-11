@@ -1,7 +1,3 @@
-if '__main__' == __name__:
-    import orekit
-    orekit.initVM()
-
 from argparse import ArgumentError
 import astropy.units as u
 from astropy.units import Quantity
@@ -281,24 +277,3 @@ class Satellite:
         
         angles = rot.getAngles(RotationOrder.XYZ, RotationConvention.FRAME_TRANSFORM)
         return LofOffset(frame, lofType, RotationOrder.XYZ, angles[0], angles[1], angles[2])
-
-if '__main__' == __name__:
-    import yaml
-    import json
-    
-    from org.hipparchus.geometry.euclidean.threed import Vector3D
-    with open('config.yaml', 'r') as file:
-        config = yaml.safe_load(file)
-    
-    if 'satellites' in config and not config['satellites'] == None:
-        for key, value in config['satellites'].items():
-            if 'filter' in value and value['filter']:
-                continue
-            
-            print(f"initializing {key}")
-            s = Satellite(key, value)
-            s.init()
-            
-            print(f"initialized {key}")
-            
-            

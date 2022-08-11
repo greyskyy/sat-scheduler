@@ -1,5 +1,5 @@
 
-from linebuilder import LineBuilder
+from .linebuilder import LineBuilder
 
 from org.hipparchus.util import FastMath
 

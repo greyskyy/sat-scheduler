@@ -1,4 +1,4 @@
-
+"""Series of utility methods supporting creation of orekit classes."""
 from functools import singledispatch
 from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
 from org.orekit.data import DataContext
@@ -39,6 +39,20 @@ def frame(s:str, context:DataContext=None,
           iersConventions:str=None,
           simpleEop:bool=False,
           **kwargs) -> Frame:
+    """Construct an orekit Frame from the provided string.
+
+    Args:
+        s (str): Frame name
+        context (DataContext, optional): Data context from which frames will be loaded. Defaults to None.
+        iersConventions (str, optional): IERSConventions to use when loading an ITRF. Defaults to None.
+        simpleEop (bool, optional): When True, tidal effects will be ignored when converting to an ITRF. Defaults to False.
+
+    Raises:
+        ValueError: When the string is None or describes an unknown frame
+
+    Returns:
+        Frame: The orekit frame instance
+    """
     if s is None:
         raise ValueError("frame name must be specified")
     
@@ -56,6 +70,18 @@ def frame(s:str, context:DataContext=None,
         raise ValueError(f"unknown frame type: {frame}")
 
 def referenceEllipsoid(model:str="wgs84", frameName:str="itrf", **kwargs) -> ReferenceEllipsoid:
+    """Create a reference ellipsoid from the string description.
+
+    Args:
+        model (str, optional): The model to use. Must be one of [wgs84, iers2010, iers2003, iers1996]. Defaults to "wgs84".
+        frameName (str, optional): Name of the ellipsoid's body frame. Defaults to "itrf".
+
+    Raises:
+        ValueError: When an unknown reference ellipsoid model is provided
+
+    Returns:
+        ReferenceEllipsoid: The reference ellipsoid instance
+    """
     if model is None:
         raise ValueError("reference ellipsoid name cannot be None")
     
@@ -73,16 +99,38 @@ def referenceEllipsoid(model:str="wgs84", frameName:str="itrf", **kwargs) -> Ref
         raise ValueError(f"Cannot convert unknown reference ellipsoid value {s}")
 
 @singledispatch
-def toVector(a=list[float]) -> Vector3D:
+def toVector(a:list[float]) -> Vector3D:
+    """Create a vector from the provided list of numbers.
+    
+    The provided values are considered to be [x, y, z]. Any missing values will be assumed to be zero.
+
+    Args:
+        a (list[float], optional): List of numbers to convert.
+
+    Returns:
+        Vector3D: A vector instance
+    """
     if a is None or len(a) == 0:
         return Vector3D.ZERO
     elif len(a) == 1:
         return Vector3D(float(a[0]), 0., 0.)
+    elif len(a) == 2:
+        return Vector3D(float(a[0]), float(a[1]), 0.)
     else:
         return Vector3D(float(a[0]), float(a[1]), float(a[2]))
 
 @toVector.register
 def _toVectorA(x:float, y:float=0., z:float=0) -> Vector3D:
+    """Create a vector from the provide values.
+
+    Args:
+        x (float): The x value
+        y (float, optional): The y value. Defaults to 0..
+        z (float, optional): The z value. Defaults to 0.
+
+    Returns:
+        Vector3D: A new vector instance
+    """
     return Vector3D(x, y, z)
 
 def toRotation(x:Vector3D=None, y:Vector3D=None, z:Vector3D=None) -> Rotation:
@@ -127,6 +175,12 @@ class FixedTransformProvider(PythonTransformProvider):
         r (Rotation, Optional): rotation from the parent to this frame. Defaults to identity rotation.
     """
     def __init__(self, tx:Vector3D=None, r:Rotation=None):
+        """Class constructor.
+
+        Args:
+            tx (Vector3D, optional): Translation vector. Defaults to None.
+            r (Rotation, optional): Frame rotation. Defaults to None.
+        """
         super().__init__()
         self.__tx = tx
         self.__r = r
