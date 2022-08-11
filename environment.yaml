@@ -1,4 +1,4 @@
-name: sat-coverage
+name: sat-scheduler
 channels:
   - defaults
 dependencies:

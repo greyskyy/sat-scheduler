@@ -10,6 +10,7 @@ from org.orekit.data import DataContext
 from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.time import AbsoluteDate
 from satellite import Satellite
+from org.orekit.propagation import SpacecraftState
 
 from org.orekit.propagation.events import LongitudeCrossingDetector
 from org.orekit.propagation.events.handlers import PythonEventHandler
@@ -41,7 +42,6 @@ class LongitudeWrapHandler(PythonEventHandler):
         self.__tracer.addStateAndNewline(s)
         return Action.CONTINUE
 
-
 def execute(item:WorkItem, centralBody:ReferenceEllipsoid=None, context:DataContext=None, step:str="PT10M"):
     if context is None:
         context = DataContext.getDefault()
@@ -49,7 +49,10 @@ def execute(item:WorkItem, centralBody:ReferenceEllipsoid=None, context:DataCont
     if centralBody is None:
         centralBody = referenceEllipsoid("wgs84", frameName="itrf", simpleEop=False, iersConventions="iers2010")
     
-    propagator = item.sat.buildPropagator(context=context)
+    # initialize the satellite
+    item.sat.init(context=context)
+    
+    propagator = item.sat.propagator
     
     stepSeconds = isodate.parse_duration(step).total_seconds()
     

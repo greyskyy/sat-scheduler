@@ -48,7 +48,20 @@ satellites:
       #v:
       # mean anomaly
       m: 257.7333 deg
-
+    lof: lvlh
+    sensors:
+      - id: camera
+        type: camera
+        focalLength: 178 mm
+        pitch: 25 um
+        imgPeriod: 22 Hz
+        cols: 1024
+        rows: 768
+        frame:
+          translation: [0., 0., 0.]
+          z: [-1, 0, 0]
+          x: [0, 1, 0]
+      
 earth:
   model: wgs84
   frameName: itrf
