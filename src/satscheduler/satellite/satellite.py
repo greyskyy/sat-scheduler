@@ -1,5 +1,6 @@
 from argparse import ArgumentError
 from functools import cache, cached_property, lru_cache
+from typing import Iterable
 import astropy.units as u
 from astropy.units import Quantity
 from dataclasses import dataclass
@@ -7,8 +8,9 @@ from requests import get
 
 from satscheduler.utils import OrekitUtils, FixedTransformProvider
 
-
+import logging
 from satscheduler.propagator import buildOrbit, buildTle, buildPropagator
+from org.orekit.propagation import BoundedPropagator
 
 from org.hipparchus.geometry.euclidean.threed import (
     Rotation,
@@ -96,7 +98,19 @@ class Sensor:
     @cached_property
     def sensorToBodyTxProv(self) -> TransformProvider:
         return TransformProviderUtils.getReversedProvider(self.bodyToSensorTxProv)
-
+    
+    @u.quantity_input
+    def createFov(self, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad) -> FieldOfView:
+        return self._createFovInFrame(
+            StaticTransform.getIdentity(), angularMargin=angularMargin
+        )
+    
+    def createFovInBodyFrame(self, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad) -> FieldOfView:
+        tx = self.sensorToBodyTxProv.getStaticTransform(AbsoluteDate.ARBITRARY_EPOCH)
+        return self._createFovInFrame(tx, angularMargin=angularMargin)
+    
+    def _createFovInFrame(self, tx: StaticTransform, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad):
+        raise NotImplementedError()
 
 class CameraSensor(Sensor):
     def __init__(self, data: CameraSensorData):
@@ -116,35 +130,7 @@ class CameraSensor(Sensor):
     def vFov(self):
         return self.__vfov
 
-    def createFov(self, angularMargin: float = 1.0e-6) -> FieldOfView:
-        return self._createFovInFrame(
-            StaticTransform.getIdentity(), angularMargin=angularMargin
-        )
-        tx = self.sensorToBodyTxProv.getStaticTransform(AbsoluteDate.ARBITRARY_EPOCH)
-        center = Vector3D.PLUS_K
-        if self.__data.rowsAlongX:
-            axis1 = Vector3D.PLUS_I
-            axis2 = Vector3D.PLUS_J
-        else:
-            axis1 = Vector3D.PLUS_J
-            axis2 = Vector3D.PLUS_I
-
-        return FieldOfView.cast_(
-            DoubleDihedraFieldOfView(
-                center,
-                axis1,
-                float(self.hFov.value / 2.0),
-                axis2,
-                float(self.vFov.value / 2.0),
-                angularMargin,
-            )
-        )
-
-    def createFovInBodyFrame(self, angularMargin: float = 1.0e-6) -> FieldOfView:
-        tx = self.sensorToBodyTxProv.getStaticTransform(AbsoluteDate.ARBITRARY_EPOCH)
-        return self._createFovInFrame(tx, angularMargin=angularMargin)
-
-    def _createFovInFrame(self, tx: StaticTransform, angularMargin: float = 1.0e-6):
+    def _createFovInFrame(self, tx: StaticTransform, angularMargin:Quantity[u.rad] = 1.0e-6 * u.rad):
         center = tx.transformVector(Vector3D.PLUS_K)
         if self.data.rowsAlongX:
             axis1 = tx.transformVector(Vector3D.PLUS_I)
@@ -159,7 +145,7 @@ class CameraSensor(Sensor):
                 float(self.hFov.value / 2.0),
                 axis2,
                 float(self.vFov.value / 2.0),
-                angularMargin,
+                float(angularMargin.to_value(u.rad)),
             )
         )
 
@@ -178,9 +164,11 @@ class Satellite:
         self.__sensors = []
         self.__attitudes = {}
 
+        tmp=[]
         if "sensors" in config:
             for s in config["sensors"]:
-                self.__sensors.append(CameraSensor(CameraSensorData(**s)))
+                tmp.append(CameraSensor(CameraSensorData(**s)))
+        self.__sensors:tuple[Sensor] = tuple(tmp)
 
     @property
     def id(self) -> str:
@@ -247,7 +235,7 @@ class Satellite:
             self.init()
         return self.__propagator
 
-    @property
+    @cached_property
     def lofType(self) -> LOFType:
         typeStr = self.__config["lof"] if "lof" in self.__config else "lvlh"
 
@@ -255,11 +243,8 @@ class Satellite:
         return LOFType.valueOf(typeStr)
 
     @property
-    def sensorCount(self) -> int:
-        return len(self.__sensors)
-
-    def getSensor(self, idx: int = 0) -> CameraSensor:
-        return self.__sensors[idx]
+    def sensors(self) -> tuple[Sensor]:
+        return self.__sensors
 
     def getAttitudeProvider(self, name: str = None) -> AttitudeProvider:
         if name is None:
@@ -393,8 +378,14 @@ class Satellites:
         if "satellites" in config and not config["satellites"] == None:
             for key, value in config["satellites"].items():
                 if "filter" in value and value["filter"]:
-                    print(f"filtering satellite {key}")
+                    logging.getLogger(__name__).info("Filtering satellite %s", key)
                 else:
                     sats.append(Satellite(key, value))
 
         return sats
+
+@dataclass(frozen=True)
+class ScheduleableSensor:
+    id:str
+    sat:Satellite
+    ephemeris:BoundedPropagator

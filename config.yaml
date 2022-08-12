@@ -82,4 +82,5 @@ earth:
   simpleEop: false
 
 control:
-  step: PT1M
+  step: PT10M
+  multithread: true

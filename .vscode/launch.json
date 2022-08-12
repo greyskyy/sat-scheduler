@@ -10,10 +10,19 @@
             "name": "Python: List AOIs",
             "type": "python",
             "request": "launch",
-            "program": "src/satscheduler/__main__.py",
+            "program": "src/",
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": ["--run-tool", "list_aoi"]
+        },
+        {
+            "name": "Python: preprocess",
+            "type": "python",
+            "request": "launch",
+            "program": "src/",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": ["--run-tool", "preprocess", "--debug"]
         }
     ]
 }

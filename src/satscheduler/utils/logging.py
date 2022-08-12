@@ -2,7 +2,7 @@ import logging
 import logging.config
 
 
-def configure_logging(level: str = "INFO"):
+def configure_logging(level: str = "INFO", root_level:str="ERROR"):
     config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -16,8 +16,8 @@ def configure_logging(level: str = "INFO"):
             "standard": {"class": "logging.StreamHandler", "formatter": "standard"}
         },
         "loggers": {
-            "": {"propagate": False},
-            "satscheduler": {"handlers": ["standard"], "level": level.upper()},
+            "": {"handlers": ["standard"], "level": root_level.upper(), "propagate": False},
+            "satscheduler": {"handlers": ["standard"], "level": level.upper(), "propagate": False},
         },
     }
     logging.config.dictConfig(config)

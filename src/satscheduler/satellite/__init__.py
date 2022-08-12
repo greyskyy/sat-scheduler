@@ -2,6 +2,7 @@
 from .satellite import (
     Satellite,
     Satellites,
+    ScheduleableSensor,
     Sensor,
     SensorData,
     CameraSensor,

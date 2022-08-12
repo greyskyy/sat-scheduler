@@ -41,6 +41,10 @@ def parseArgs() -> tuple[argparse.Namespace, dict]:
         choices=[m[0] for m in getmembers(tools, isfunction)],
         dest="tool",
     )
+    parser.add_argument("--test",
+                        help="Run in test-mode.",
+                        action="store_true",
+                        default=False)
 
     loglevel = parser.add_mutually_exclusive_group()
     loglevel.add_argument(
@@ -54,11 +58,12 @@ def parseArgs() -> tuple[argparse.Namespace, dict]:
     )
     loglevel.add_argument("--info", action="store_const", const="INFO", dest="loglevel")
     loglevel.add_argument(
-        "--trace", action="store_const", const="TRACE", dest="loglevel"
-    )
-    loglevel.add_argument(
         "--debug", action="store_const", const="DEBUG", dest="loglevel"
     )
+    
+    threadgroup = parser.add_mutually_exclusive_group()
+    threadgroup.add_argument("--multi-threading", action="store_true", dest="threading", help="Run with multi-threading. Overrides the value set in the config.")
+    threadgroup.add_argument("--no-multi-threading", action="store_false", dest="threading", help="Disable multi-threaded processing. Overrides the value set in configuration.")
 
     args = parser.parse_args()
 

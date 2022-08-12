@@ -1,9 +1,8 @@
 from dataclasses import dataclass
-from pickle import FALSE
-from folium import Map
+from typing import Iterable
 
 from functools import cached_property
-from satscheduler.utils import DateIntervalList, SafeListBuilder
+from satscheduler.utils import DateIntervalList, SafeListBuilder, DateInterval
 from .linebuilder import LineBuilder
 from .nadirtrace import NadirTrace
 from satscheduler.aoi import Aoi
@@ -16,7 +15,7 @@ from org.orekit.data import DataContext
 from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.propagation import BoundedPropagator
 from org.orekit.time import AbsoluteDate
-from satscheduler.satellite import CameraSensor, Satellite
+from satscheduler.satellite import CameraSensor, Satellite, ScheduleableSensor
 
 from org.orekit.propagation.events import (
     LongitudeCrossingDetector,
@@ -27,25 +26,9 @@ from org.orekit.propagation.events.handlers import PythonEventHandler
 
 from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
 
+import logging
 import isodate
 import numpy as np
-
-# import logging
-
-
-@dataclass
-class WorkItem:
-    """
-    Work packet describing the satellite to schedule.
-    """
-
-    start: AbsoluteDate
-    stop: AbsoluteDate
-    sat: Satellite
-    aoi: list[Aoi]
-    map: Map
-    schedule = None
-
 
 @dataclass(frozen=True)
 class PreprocessedAoi:
@@ -82,7 +65,7 @@ class LongitudeWrapHandler(PythonEventHandler):
             self.__tracer.addStateAndNewline(s)
             return Action.CONTINUE
         except BaseException as e:
-            # print(f"caught exception in longitude handler: {e}")
+            logging.getLogger(self.__class__.__name__).exception("Caught exception in longitude handler.", exc_info=e)
             raise e
 
 
@@ -123,6 +106,7 @@ class AoiHandler(PythonEventHandler):
         self.__sat = sat
         self.__sensor = sensor
         self.__builder = builder if builder else SafeListBuilder()
+        self.__logger = logging.getLogger(self.__class__.__name__)
 
     def init(self, initialstate, target, detector):
         pass
@@ -133,14 +117,14 @@ class AoiHandler(PythonEventHandler):
     def eventOccurred(self, s, detector, increasing):
         try:
             if increasing:
-                # print(f"exiting {self.__id} at: {s.getDate()}")
-                self.__builder.add_stop(s)
+                self.__logger.debug("Exiting aoi=%s at %s", self.__aoi.id, s.getDate())
+                self.__builder.add_stop(s.getDate())
             else:
-                # print(f"entering {self.__id} at {s.getDate()}")
-                self.__builder.add_start(s)
+                self.__logger.debug("Entering aoi=%s at %s", self.__aoi.id, s.getDate())
+                self.__builder.add_start(s.getDate())
             return Action.CONTINUE
         except BaseException as e:
-            # print(f"Caught exception {e}")
+            self.__logger.exception("Caught exception processing aoi=%s", self.__aoi.id, exc_info=e)
             raise e
 
     def result(self) -> PreprocessedAoi:
@@ -154,6 +138,7 @@ class AoiHandler(PythonEventHandler):
 
 @dataclass(frozen=True)
 class PreprocessingResult:
+    sensor:ScheduleableSensor
     sat: Satellite
     ephemeris: BoundedPropagator
     aois: tuple[PreprocessedAoi]
@@ -162,16 +147,33 @@ class PreprocessingResult:
 class Preprocessor:
     def __init__(
         self,
-        item: WorkItem,
+        interval:DateInterval,
+        sat: Satellite,
+        aois: Iterable[Aoi],
         centralBody: ReferenceEllipsoid = None,
         context: DataContext = None,
         step: str = "PT10M",
     ):
-        self.__item = item
+        self.__interval = interval
+        self.__sat = sat
+        self.__aois = tuple(aois)
         self.__centralBody = centralBody
         self.__context = context
-        self.__step = step
+        self.__step = step or "PT10M"
+        self.__last_result = None
+    
+    @property
+    def sat(self) -> Satellite:
+        return self.__sat
 
+    @property
+    def interval(self) -> DateInterval:
+        return self.__interval
+
+    @property
+    def aois(self) -> tuple[Aoi]:
+        return self.__aois
+    
     @property
     def context(self) -> DataContext:
         if not self.__context:
@@ -190,30 +192,38 @@ class Preprocessor:
             )
         return self.__centralBody
 
-    @property
-    def workItem(self) -> WorkItem:
-        return self.__item
-
     @cached_property
     def stepSeconds(self) -> str:
         return isodate.parse_duration(self.__step).total_seconds()
+    
+    @cached_property
+    def logger(self) -> logging.Logger:
+        return logging.getLogger(self.__class__.__name__)
+    
+    @property
+    def last_result(self) -> PreprocessingResult:
+        """The result of the last time this preprocessor was executed.
 
-    def __call__(self) -> PreprocessingResult:
-        """Execute a schedule work item."""
+        Returns:
+            PreprocessingResult: The last result, or None if this object hasn't been executed.
+        """
+        return self.__last_result
+
+    def __call__(self, test_mode:bool=False) -> PreprocessingResult:
+        """Exeucte this preprocessor."""
         # initialize the satellite
-        self.workItem.sat.init(context=self.context, earth=self.centralBody)
+        self.logger.info("Initializing satellite %s", self.sat.id)
+        self.sat.init(context=self.context, earth=self.centralBody)
 
-        propagator = self.workItem.sat.propagator
+        propagator = self.sat.propagator
 
         stepSeconds = self.stepSeconds
 
-        print(
-            f"starting work for {self.workItem.sat.id} over timespan {self.workItem.start} to {self.workItem.stop}"
-        )
+        self.logger.critical("Starting work for %s over timespan %s ", self.sat.id, self.interval)
 
         # set the propagator at the start time before we do anything else
-        print("initially propagating")
-        propagator.propagate(self.workItem.start)
+        self.logger.debug("Initially propagating to %s", self.interval.start.toString())
+        propagator.propagate(self.interval.start)
 
         generator = propagator.getEphemerisGenerator()
 
@@ -234,49 +244,50 @@ class Preprocessor:
         )
         """
 
+        # register aoi detectors per sensor
+        handlers = []
+        count=0
+        #for sensor in self.sat.sensors:
+        #    fov = sensor.createFovInBodyFrame()
+            
         sensor_idx = 0
-        sensor = self.workItem.sat.getSensor(sensor_idx)
+        sensor = self.sat.sensors[sensor_idx]
         fov = sensor.createFovInBodyFrame()
 
         # register aoi detectors
         handlers = []
-        for aoi in self.workItem.aoi.aois:
+        count=0
+        for aoi in self.aois:
             handler = AoiHandler(
                 aoi=aoi,
-                sat=self.workItem.sat,
+                sat=self.sat,
                 sensor=sensor,
-                builder=SafeListBuilder(self.workItem.start, self.workItem.stop),
+                builder=SafeListBuilder(self.interval.start, self.interval.stop),
             )
             handlers.append(handler)
 
-            print(f"registring for aoi: {aoi.id}")
-            if aoi.size < 500:
-                propagator.addEventDetector(
-                    FootprintOverlapDetector(
-                        fov, self.centralBody, aoi.zone, 10000.0
-                    ).withHandler(handler)
-                )
-            else:
-                print(f"simplifying complex aoi {aoi.id} (boundarySize={aoi.size})")
-                simplified = aoi.simplify()
-                print(
-                    f"simplifed aoi {aoi.id} (origBoundarySize={aoi.size}, simplifiedSize={simplified.size}"
-                )
+            try:
+                self.logger.debug("Registring for aoi: %s", aoi.id)
+                for zone in aoi.createZones():
+                    propagator.addEventDetector(
+                        FootprintOverlapDetector(
+                            fov, self.centralBody, zone, 10000.0
+                        ).withHandler(handler)
+                    )
+            except BaseException as e:
+                self.logger.warning("Caught exception building zones, skipping %s", aoi.id, exc_info=e)
+            
+            count = count + 1
+            if test_mode and count > 10:
+                break
 
-                propagator.addEventDetector(
-                    FootprintOverlapDetector(
-                        fov, self.centralBody, simplified.zone, 10000.0
-                    ).withHandler(handler)
-                )
-
-        print("computing prop time")
         # do the work
-        propTime = self.workItem.stop.durationFrom(self.workItem.start)
+        propTime = self.interval.stop.durationFrom(self.interval.start)
         elapsed = 0.0
 
-        print("propagating over time")
+        self.logger.debug("Propagating over time")
         while elapsed <= propTime:
-            t = self.workItem.start.shiftedBy(elapsed)
+            t = self.interval.start.shiftedBy(elapsed)
             try:
                 state = propagator.propagate(t)
                 # nadirTracer.addState(state)
@@ -286,9 +297,7 @@ class Preprocessor:
 
                 elapsed += stepSeconds
             except BaseException as e:
-                print(
-                    f"Caught exception processing sat {self.workItem.sat.id} at time {t}: {e}"
-                )
+                self.logger.exception("Caught exception processing sat=%s at time %s.", self.sat.id, t.toString(), exc_info=e)
                 raise e
 
         """
@@ -302,9 +311,11 @@ class Preprocessor:
                 a.add_to(item.map, color="red")
         """
 
-        print(f"completed work for {self.workItem.sat.id}")
-        return PreprocessingResult(
+        self.logger.info("Completed work for %s", self.sat.id)
+        self.__last_result = PreprocessingResult(
             ephemeris=generator.getGeneratedEphemeris(),
-            sat=self.workItem.sat,
+            sat=self.sat,
             aois=tuple(h.result() for h in handlers),
+            sensor=None
         )
+        return self.__last_result

@@ -504,7 +504,7 @@ class SafeListBuilder:
         for start, stop in zip(*[iter(self.__dates)] * 2):
             intervals.append(DateInterval(start, stop))
 
-        return DateIntervalList(inervals=intervals, reduce_input=True)
+        return DateIntervalList(intervals=intervals, reduce_input=True)
 
 
 def _verifylist(list1) -> DateIntervalList:
