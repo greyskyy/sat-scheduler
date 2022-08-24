@@ -98,19 +98,24 @@ class Sensor:
     @cached_property
     def sensorToBodyTxProv(self) -> TransformProvider:
         return TransformProviderUtils.getReversedProvider(self.bodyToSensorTxProv)
-    
+
     @u.quantity_input
     def createFov(self, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad) -> FieldOfView:
         return self._createFovInFrame(
             StaticTransform.getIdentity(), angularMargin=angularMargin
         )
-    
-    def createFovInBodyFrame(self, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad) -> FieldOfView:
+
+    def createFovInBodyFrame(
+        self, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad
+    ) -> FieldOfView:
         tx = self.sensorToBodyTxProv.getStaticTransform(AbsoluteDate.ARBITRARY_EPOCH)
         return self._createFovInFrame(tx, angularMargin=angularMargin)
-    
-    def _createFovInFrame(self, tx: StaticTransform, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad):
+
+    def _createFovInFrame(
+        self, tx: StaticTransform, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad
+    ):
         raise NotImplementedError()
+
 
 class CameraSensor(Sensor):
     def __init__(self, data: CameraSensorData):
@@ -130,7 +135,9 @@ class CameraSensor(Sensor):
     def vFov(self):
         return self.__vfov
 
-    def _createFovInFrame(self, tx: StaticTransform, angularMargin:Quantity[u.rad] = 1.0e-6 * u.rad):
+    def _createFovInFrame(
+        self, tx: StaticTransform, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad
+    ):
         center = tx.transformVector(Vector3D.PLUS_K)
         if self.data.rowsAlongX:
             axis1 = tx.transformVector(Vector3D.PLUS_I)
@@ -164,11 +171,11 @@ class Satellite:
         self.__sensors = []
         self.__attitudes = {}
 
-        tmp=[]
+        tmp = []
         if "sensors" in config:
             for s in config["sensors"]:
                 tmp.append(CameraSensor(CameraSensorData(**s)))
-        self.__sensors:tuple[Sensor] = tuple(tmp)
+        self.__sensors: tuple[Sensor] = tuple(tmp)
 
     @property
     def id(self) -> str:
@@ -384,8 +391,9 @@ class Satellites:
 
         return sats
 
+
 @dataclass(frozen=True)
 class ScheduleableSensor:
-    id:str
-    sat:Satellite
-    ephemeris:BoundedPropagator
+    id: str
+    sat: Satellite
+    ephemeris: BoundedPropagator

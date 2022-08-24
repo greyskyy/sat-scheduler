@@ -12,6 +12,7 @@ from org.orekit.data import DataContext
 
 import folium
 
+
 def preprocess(args=None, config=None, vm=None):
     """Load the AOIs, generating a summary + map plot.
 
@@ -23,33 +24,38 @@ def preprocess(args=None, config=None, vm=None):
     logger = logging.getLogger(__name__)
 
     logger.info("Starting preprocessor tool.")
-    
+
     results = pre_processor.execute(args=args, config=config, vm=vm)
-    
-    processed_aois:list[pre_processor.PreprocessedAoi]=[]
+
+    processed_aois: list[pre_processor.PreprocessedAoi] = []
     for r in results:
         processed_aois.extend(r.aois)
-    
-    logger.critical("Preprocessing successfully completed. Loaded %d processed aois.", len(processed_aois))
-    
+
+    logger.critical(
+        "Preprocessing successfully completed. Loaded %d processed aois.",
+        len(processed_aois),
+    )
+
     map = folium.Map()
-    
+
     zero_count = 0
-    
+
     for pa in processed_aois:
         sum = reduce(lambda d, ivl: d + ivl.duration, pa.intervals, timedelta())
-        
+
         if sum.total_seconds():
-            print(f"aoi {pa.aoi.id} loaded with {len(pa.intervals)} total accesses totalling {sum}.")
+            print(
+                f"aoi {pa.aoi.id} loaded with {len(pa.intervals)} total accesses totalling {sum}."
+            )
         else:
             zero_count = zero_count + 1
-        
+
         folium.GeoJson(
-            pa.aoi.to_gdf(),
-            name=pa.aoi.id,
-            popup=pa.aoi.id,
-            zoom_on_click=True).add_to(map)
-    
-    logger.critical("After processing, %d/%d aois have no access.", zero_count, len(processed_aois))
-    
+            pa.aoi.to_gdf(), name=pa.aoi.id, popup=pa.aoi.id, zoom_on_click=True
+        ).add_to(map)
+
+    logger.critical(
+        "After processing, %d/%d aois have no access.", zero_count, len(processed_aois)
+    )
+
     map.save("preprocessed_aoi.html")

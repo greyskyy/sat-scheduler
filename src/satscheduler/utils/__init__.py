@@ -8,3 +8,4 @@ from .dateutils import (
 )
 from .orekitutils import FixedTransformProvider, OrekitUtils
 from .logging import configure_logging
+from .ephemerisgenerator import EphemerisGenerator

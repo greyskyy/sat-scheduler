@@ -98,6 +98,33 @@ class DateInterval:
         """
         return [self.__start, self.__stop]
 
+    def pad(self, time: float | timedelta):
+        """Increase the interval symmetrically by moving the start earlier and the stop later by the provided amount.
+
+        The interval duration will increase by `2 * time`.
+
+        Args:
+            time (float | timedelta): The amount to pad each side. Specified as a float number of seconds or the timedelta duration.
+
+        Returns:
+            DateInterval: The new interval, padded.
+
+        Raises:
+            ValueError: When the pad negative and would result in a negative interval duration.
+        """
+        padSeconds = 0
+        if isinstance(time, timedelta):
+            padSeconds = time.total_seconds()
+        elif time:
+            padSeconds = float(time)
+
+        if (2 * padSeconds) < -self.duration_secs:
+            raise ValueError("Negative pad must be less than half the duration")
+
+        return DateInterval(
+            self.start.shiftedBy(-padSeconds), self.stop.shiftedBy(padSeconds)
+        )
+
     def contains(
         self, other, startInclusive: bool = True, stopInclusive: bool = False
     ) -> bool:

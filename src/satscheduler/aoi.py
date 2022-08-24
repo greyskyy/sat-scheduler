@@ -33,9 +33,10 @@ warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 
 class Aoi:
     """An Area of Interest to be collected by the scheduler.
-    
+
     This object holds the region, as well as any necessary metadata regarding the region.
     """
+
     def __init__(
         self,
         id: str,
@@ -127,7 +128,7 @@ class Aoi:
     @property
     def crs(self):
         """The CRS in which the polygon is defined.
-        
+
         This may be None, if unspecified in the constructor.
 
         Returns:
@@ -155,7 +156,9 @@ class Aoi:
         )
 
     @units.quantity_input
-    def createZones(self, tolerance:units.Quantity[units.m] = 1000 * units.m) -> SphericalPolygonsSet:
+    def createZones(
+        self, tolerance: units.Quantity[units.m] = 1000 * units.m
+    ) -> SphericalPolygonsSet:
         """Create the spherical polygons set, suitable for payload operations for this aoi.
 
         Returns:
@@ -167,7 +170,7 @@ class Aoi:
         gdf = gdf.to_crs(
             "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
         )
-        #gs = gdf.buffer(buffer)
+        # gs = gdf.buffer(buffer)
         gs = gdf.geometry
         if tolerance.value > 0:
             gs = gs.simplify(tolerance.to_value(units.m))
@@ -178,8 +181,8 @@ class Aoi:
             ccw = shapely.geometry.polygon.orient(
                 Polygon(shell=p.exterior)
             )  # not sure this should go here
-            
-            try: 
+
+            try:
                 zones.append(_toZone(ccw))
             except BaseException as e:
                 print(f"Caught exception building zone for {self.id} error: {e}")
@@ -232,14 +235,16 @@ def _toZone(polygon: Polygon) -> SphericalPolygonsSet:
         if prev:
             d_lat = abs(p[1] - prev[1])
             d_lon = abs(p[0] - prev[1])
-            if (d_lat < 0.000001 or d_lat > 89.999999) and (d_lon < 0.000001 or d_lon > 359.999999):
+            if (d_lat < 0.000001 or d_lat > 89.999999) and (
+                d_lon < 0.000001 or d_lon > 359.999999
+            ):
                 continue
-            
+
         if p[1] >= -90 and p[1] <= 90:
             points.append(
                 GeodeticPoint(FastMath.toRadians(p[1]), FastMath.toRadians(p[0]), 0.0)
             )  # put lon,lat into lat,lon order
-        
+
         prev = p
 
     return EllipsoidTessellator.buildSimpleZone(float(1.0e-10), points)
@@ -321,12 +326,15 @@ def _buildAoi(
     elif isinstance(geometry, Polygon):
         fixed = antimeridian.split(geometry)
         if fixed:
-            yield from _buildAoi(fixed,
-                                id,alpha2=alpha2,
-                                alpha3=alpha3,
-                                country=country,
-                                continent=continent,
-                                crs=crs)
+            yield from _buildAoi(
+                fixed,
+                id,
+                alpha2=alpha2,
+                alpha3=alpha3,
+                country=country,
+                continent=continent,
+                crs=crs,
+            )
         else:
             ccw = shapely.geometry.polygon.orient(Polygon(shell=geometry.exterior))
             if crs is None:
@@ -356,7 +364,7 @@ def _buildAoi(
         fixed = antimeridian.split_multipolygon(geometry)
         if fixed:
             geometry = fixed
-            
+
         idx = 0
         for g in _polygons(geometry):
             yield from _buildAoi(
@@ -380,10 +388,10 @@ def loadAois(
     sourceUrl: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",
     bbox: tuple[float, float, float, float] = None,
     buffer: units.Quantity[units.m] = 20000 * units.m,
-    tolerance: units.Quantity[units.m] = 1000 * units.m
+    tolerance: units.Quantity[units.m] = 1000 * units.m,
 ) -> list[Aoi]:
     """Load the AOIs from the source as a list of Aoi objects.
-    
+
     If the `buffer` parameter is greater than 0, all AOIs will have their boundary expanded, as defined by the geopandsas.GeoSeries.buffer method.
     If the `tolerance` parameter is greater than 0, the aois will have their boundaries simplified.
 
@@ -396,7 +404,7 @@ def loadAois(
     Returns:
         list[Aoi]: The list of loaded Aoi objects.
     """
-    
+
     logger = logging.getLogger(__name__)
     logger.debug("loading aois from %s", sourceUrl)
 
@@ -425,28 +433,36 @@ def loadAois(
         alpha2 = row["ISO_A2"]
         alpha3 = row["ISO_A3"]
         geometry = gdf.geometry[index]
-        
+
         # buffer the area
-        frame = GeoDataFrame(data={"ADMIN":[country],
-                                    "ISO_A2":[alpha2],
-                                    "ISO_A3":[alpha3],
-                                    "CONTINENT":[continent],
-                                    "geometry":[geometry]},
-                              crs="+proj=longlat +datum=WGS84 +no_defs")
+        frame = GeoDataFrame(
+            data={
+                "ADMIN": [country],
+                "ISO_A2": [alpha2],
+                "ISO_A3": [alpha3],
+                "CONTINENT": [continent],
+                "geometry": [geometry],
+            },
+            crs="+proj=longlat +datum=WGS84 +no_defs",
+        )
 
         frame = frame.to_crs(
             "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
         )
         frame = frame.buffer(buffer.to_value(units.m))
         frame = frame.to_crs(crs)
-        
+
         if frame.geometry.is_valid.bool():
             geometry = frame.geometry
         else:
-            logger.warn("Invalid buffered geometry, using unbuffered geometry for continent=%s country=%s", continent, country)
-        
-        #splits = frame.apply(antimeridian.fix_item)
-        #frame.loc[splits.dropna().index, "geometry"] = splits
+            logger.warn(
+                "Invalid buffered geometry, using unbuffered geometry for continent=%s country=%s",
+                continent,
+                country,
+            )
+
+        # splits = frame.apply(antimeridian.fix_item)
+        # frame.loc[splits.dropna().index, "geometry"] = splits
 
         count = count + 1
 

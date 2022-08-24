@@ -11,15 +11,14 @@ import logging
 from satscheduler.satellite.satellite import Satellite, Sensor
 
 
-
-def schedule(preprocessed:Iterable[PreprocessingResult], context:DataContext=None):
+def schedule(preprocessed: Iterable[PreprocessingResult], context: DataContext = None):
     logger = logging.getLogger(__name__)
-    
+
     if context is None:
         context = DataContext.getDefault()
-    
+
     sensors = {}
     for p in preprocessed:
-        
+
         for sensor in p.sat.sensors:
             pass
