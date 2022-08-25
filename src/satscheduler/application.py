@@ -1,152 +1,119 @@
-'''
-Satellite analytics engine
-'''
+"""Satellite analytics engine."""
 
 import argparse
 from typing import Any
-import folium
 import orekit
 import yaml
-#import logging
 
-from aoi import AoiCollection
-from satellite import Satellite
+import satscheduler.utils as utils
 
-from dataloader import download
+from inspect import getmembers, isfunction
+
+
+from satscheduler.dataloader import download
 from orekit.pyhelpers import setup_orekit_curdir
-from orekithelpers import referenceEllipsoid
-from org.orekit.data import DataContext
-from org.orekit.models.earth import ReferenceEllipsoid
-from org.orekit.time import AbsoluteDate, DateTimeComponents
-from threading import Thread
-from scheduler import WorkItem, schedule
+
+import satscheduler.tools as tools
+
 
 def parseArgs() -> tuple[argparse.Namespace, dict]:
-    """Parse commandline arguments
+    """Parse commandline arguments.
 
     Returns:
-        argparse.Namespace: the parse arguments
+        argparse.Namespace: the parsed arguments
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument('-o', '--output',
-                        help='Output html file.',
-                        type=str,
-                        default='index.html')
-    parser.add_argument('-c', '--config',
-                        help='path to the configuration yaml file',
-                        type=str,
-                        default='config.yaml')
-    
+    parser.add_argument(
+        "-o", "--output", help="Output html file.", type=str, default="index.html"
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        help="path to the configuration yaml file",
+        type=str,
+        default="config.yaml",
+    )
+    parser.add_argument(
+        "-t",
+        "--run-tool",
+        help="Run a specific tool (default=scheduler)",
+        metavar="tool",
+        choices=[m[0] for m in getmembers(tools, isfunction)],
+        dest="tool",
+    )
+    parser.add_argument(
+        "--test", help="Run in test-mode.", action="store_true", default=False
+    )
+
+    loglevel = parser.add_mutually_exclusive_group()
+    loglevel.add_argument(
+        "--quiet", action="store_const", const="CRITICAL", dest="loglevel"
+    )
+    loglevel.add_argument(
+        "--terse", action="store_const", const="ERROR", dest="loglevel"
+    )
+    loglevel.add_argument(
+        "--warn", action="store_const", const="WARNING", dest="loglevel"
+    )
+    loglevel.add_argument("--info", action="store_const", const="INFO", dest="loglevel")
+    loglevel.add_argument(
+        "--debug", action="store_const", const="DEBUG", dest="loglevel"
+    )
+
+    threadgroup = parser.add_mutually_exclusive_group()
+    threadgroup.add_argument(
+        "--multi-threading",
+        action="store_true",
+        dest="threading",
+        help="Run with multi-threading. Overrides the value set in the config.",
+    )
+    threadgroup.add_argument(
+        "--no-multi-threading",
+        action="store_false",
+        dest="threading",
+        help="Disable multi-threaded processing. Overrides the value set in configuration.",
+    )
+
     args = parser.parse_args()
-    
-    with open(args.config, 'r') as file:
+
+    with open(args.config, "r") as file:
         config = yaml.safe_load(file)
-    
+
     return (args, config)
 
-def saveMap(map:folium.Map, filename='index.html'):
-    """
-    Save the map to the file
-
-    Args:
-        map (folium.Map): The map object to save
-        filename (str, optional): Filename where the map will be saved. Defaults to 'index.html'.
-    """
-    map.save(filename)
 
 def initOrekit(config):
     """
     Initialize the orekit data, download if necessary.
     """
-    filePath = download(config['data'])
-    
+    filePath = download(config["data"])
+
     setup_orekit_curdir(filename=filePath)
 
-def loadSatellites(config:dict) -> list[Satellite]:
-    """
-    Load the satellites from the provided configuration
+
+def runApp(vm=None):
+    """Run the specified application.
 
     Args:
-        config (dict): The configuration dictionary loaded from the yaml file.
+        vm (Any): The orekit vm handle.
+
+    Raises:
+        ValueError: When an unknown application is specified.
 
     Returns:
-        list[Satellite]: List of satellite configuration objects
+        _type_: _description_
     """
-    sats = []
-    
-    if 'satellites' in config and not config['satellites'] == None:
-        for key, value in config['satellites'].items():
-            if 'filter' in value and value['filter']:
-                print (f"filtering satellite {key}")
-            else:
-                sats.append(Satellite(key, value))
-    
-    return sats
+    if vm is None:
+        vm = orekit.initVM()
 
-def timespan(config:dict, context:DataContext=None) -> tuple[AbsoluteDate,AbsoluteDate]:
-    """
-    Compute the execution timespan based on the configuration.
-
-    Args:
-        config (dict): the configuration dictionary
-        context (DataContext, optional): The data context, if None, the default context will be used
-
-    Returns:
-        tuple[AbsoluteDate,AbsoluteDate]: _description_
-    """
-    
-    if context is None:
-        context = DataContext.getDefault()
-        
-    t0 = config['run']['start']
-    t1 = config['run']['stop']
-    
-    return (AbsoluteDate(DateTimeComponents.parseDateTime(t0), context.getTimeScales().getUTC()),
-            AbsoluteDate(DateTimeComponents.parseDateTime(t1), context.getTimeScales().getUTC()))
-
-def doWork(vm, workItem:WorkItem, earth:ReferenceEllipsoid=None, context:DataContext=None, **kwargs):
-    """
-    Thread target. Attaches the thread to the orekit VM before executing the actual propagation work
-
-    Args:
-        workItem (WorkItem): The item of work
-    """
-    vm.attachCurrentThread() # do this before any orekit in a background thread
-    schedule(item=workItem, centralBody=earth, context=context, **kwargs)
-
-# Main function
-def runApp(vm):
-    """
-    Main function
-    """
     (args, config) = parseArgs()
-    initOrekit(config['orekit'])
-    
-    context = DataContext.getDefault()
-    
-    countries = AoiCollection(bbox=(-85, -60, -33, 13))
-    countries.load()
-    
-    (start, stop) = timespan(config, DataContext.getDefault())
-    
-    map = folium.Map()
-    folium.GeoJson(data=countries.geoJson).add_to(map)
-    
-    # load the reference ellipsoid
-    if 'earth' in config:
-        earth = referenceEllipsoid(context=context, **(config['earth']))
-    else:
-        earth = referenceEllipsoid(model="wgs-84", context=context)
-    
-    sats = loadSatellites(config)
-    workers = []
-    for s in sats:
-        work = WorkItem(start=start, stop=stop, sat=s, map=map, aoi=countries)
-        thread = Thread(target=doWork, kwargs={'vm':vm, 'workItem':work, 'context':context, 'earth':earth, **(config['control'])})
-        thread.start()
-        workers.append(thread)
-    
-    for t in workers:
-        t.join()
-        
-    saveMap(map, filename=args.output)
+
+    utils.configure_logging(args.loglevel or "INFO")
+
+    initOrekit(config["orekit"])
+
+    for name, method in getmembers(tools, isfunction):
+        if name == args.tool:
+            return method(vm=vm, args=args, config=config)
+
+    raise ValueError(f"cannot run unknown tool: {args.tool}")

@@ -1,8 +1,7 @@
-"""Initialize and run the satellite scheduler application"""
-
-import orekit
+"""Initialize and run the satellite scheduler application."""
 from application import runApp
+import sys
 
-vm = orekit.initVM()
-
-runApp(vm)
+if __name__ == "__main__":
+    rc = runApp()
+    sys.exit(rc)

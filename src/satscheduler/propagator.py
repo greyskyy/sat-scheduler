@@ -6,26 +6,32 @@ from astropy.units import Quantity
 from typing import Any
 
 import orekit
-from orekithelpers import frame as loadFrame, referenceEllipsoid
+from satscheduler.utils import OrekitUtils, string_to_absolutedate
 
 from org.hipparchus.ode.nonstiff import DormandPrince853Integrator
 from org.orekit.attitudes import AttitudeProvider, InertialProvider
 from org.orekit.bodies import CelestialBody
 from org.orekit.data import DataContext
 from org.orekit.forces.drag import DragForce, IsotropicDrag
-from org.orekit.forces.gravity import HolmesFeatherstoneAttractionModel, ThirdBodyAttraction
+from org.orekit.forces.gravity import (
+    HolmesFeatherstoneAttractionModel,
+    ThirdBodyAttraction,
+)
 from org.orekit.forces.gravity.potential import GravityFieldFactory
-from org.orekit.forces.radiation import IsotropicRadiationClassicalConvention, SolarRadiationPressure
-from org.orekit.time import AbsoluteDate, DateTimeComponents
+from org.orekit.forces.radiation import (
+    IsotropicRadiationClassicalConvention,
+    SolarRadiationPressure,
+)
 from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.models.earth.atmosphere import HarrisPriester
 from org.orekit.orbits import KeplerianOrbit, Orbit, OrbitType, PositionAngle
 from org.orekit.propagation import Propagator, SpacecraftState
 from org.orekit.propagation.analytical.tle import TLE, TLEPropagator
 from org.orekit.propagation.numerical import NumericalPropagator
-from org.orekit.utils import Constants, IERSConventions
+from org.orekit.utils import Constants
 
-def buildTle(line1:str, line2:str, context:DataContext=None) -> TLE:
+
+def buildTle(line1: str, line2: str, context: DataContext = None) -> TLE:
     """
     Build a TLE from the input lines
 
@@ -39,15 +45,28 @@ def buildTle(line1:str, line2:str, context:DataContext=None) -> TLE:
     """
     if context is None:
         context = DataContext.getDefault()
-    
+
     utc = context.getTimeScales().getUTC()
-    
+
     return TLE(line1, line2, utc)
 
-def buildOrbit(a:Any, e:Any, i:Any, omega:Any, w:Any, epoch:str, frame:str=None, v:Any=None, m:Any=None, context:DataContext=None, mu:float=None) -> Orbit:
+
+def buildOrbit(
+    a: Any,
+    e: Any,
+    i: Any,
+    omega: Any,
+    w: Any,
+    epoch: str,
+    frame: str = None,
+    v: Any = None,
+    m: Any = None,
+    context: DataContext = None,
+    mu: float = None,
+) -> Orbit:
     """
     Build an orbit from the provided values.
-    
+
     Args:
         a (Any): The semi-major axis of the orbit, as a string parsable by astropy.units.Quantity. If a number, must be in meters.
         e (Any): The orbital eccentricity
@@ -70,16 +89,16 @@ def buildOrbit(a:Any, e:Any, i:Any, omega:Any, w:Any, epoch:str, frame:str=None,
     # TODO: handle EquinoctialOrbit and CircularOrbit construction
     if context is None:
         context = DataContext.getDefault()
-    
+
     if mu is None:
         mu = Constants.WGS84_EARTH_MU
-    
+
     aValue = Quantity(a).si
     eValue = float(e)
     iValue = Quantity(i).si
     omegaValue = Quantity(omega).si
     wValue = Quantity(w).si
-    
+
     if not v is None:
         type = PositionAngle.TRUE
         anom = Quantity(v).si
@@ -88,17 +107,35 @@ def buildOrbit(a:Any, e:Any, i:Any, omega:Any, w:Any, epoch:str, frame:str=None,
         anom = Quantity(m).si
     else:
         raise ValueError("either true or mean anomaly must be specified")
-    
+
     if not frame is None:
-        frameValue = loadFrame(frame, context=context)
+        frameValue = OrekitUtils.frame(frame, context=context)
     else:
         frameValue = context.getFrames().getGCRF()
-        
-    epochValue = AbsoluteDate(DateTimeComponents.parseDateTime(epoch), context.getTimeScales().getUTC())
-    return KeplerianOrbit(float(aValue.value), eValue, float(iValue.value), float(wValue.value), float(omegaValue.value), float(anom.value), type, frameValue, epochValue, mu)
+
+    epochValue = string_to_absolutedate(epoch, context=context)
+    return KeplerianOrbit(
+        float(aValue.value),
+        eValue,
+        float(iValue.value),
+        float(wValue.value),
+        float(omegaValue.value),
+        float(anom.value),
+        type,
+        frameValue,
+        epochValue,
+        mu,
+    )
+
 
 @singledispatch
-def buildPropagator(tle:TLE, attitudeProvider:AttitudeProvider=None, mass:float=100., context:DataContext=None, **kwargs) -> Propagator:
+def buildPropagator(
+    tle: TLE,
+    attitudeProvider: AttitudeProvider = None,
+    mass: float = 100.0,
+    context: DataContext = None,
+    **kwargs
+) -> Propagator:
     """Generate a propagator from a TLE
 
     Args:
@@ -112,33 +149,38 @@ def buildPropagator(tle:TLE, attitudeProvider:AttitudeProvider=None, mass:float=
     """
     if context is None:
         context = DataContext.getDefault()
-    
+
     teme = context.getFrames().getTEME()
     if attitudeProvider is None:
         attitudeProvider = InertialProvider.of(teme)
-    
+
     return TLEPropagator.selectExtrapolator(tle, attitudeProvider, mass, teme)
 
+
 @buildPropagator.register
-def _(orbit:Orbit, attitudeProvider:AttitudeProvider=None, mass:float=100.,
-                    centralBody:ReferenceEllipsoid=None,
-                    context:DataContext=None,
-                    minStep:float=0.001,
-                    maxStep:float=1000.,
-                    positionTolerance:float=10.,
-                    considerGravity:bool=True,
-                    gravityFieldDegree:int=2,
-                    gravityFieldOrder:int=2,
-                    considerSolarPressure:bool=True,
-                    sun:CelestialBody=None,
-                    solarPressureCrossSection:float=1.,
-                    solarCa:float=0.2,
-                    solarCs:float=0.8,
-                    considerAtmosphere:bool=True,
-                    atmosphereCrossSection:float=1.,
-                    atmosphereDragCoeff:float=2.2,
-                    bodies:list=['sun','moon','jupiter'],
-                    **kwargs) -> Propagator:
+def _(
+    orbit: Orbit,
+    attitudeProvider: AttitudeProvider = None,
+    mass: float = 100.0,
+    centralBody: ReferenceEllipsoid = None,
+    context: DataContext = None,
+    minStep: float = 0.001,
+    maxStep: float = 1000.0,
+    positionTolerance: float = 10.0,
+    considerGravity: bool = True,
+    gravityFieldDegree: int = 2,
+    gravityFieldOrder: int = 2,
+    considerSolarPressure: bool = True,
+    sun: CelestialBody = None,
+    solarPressureCrossSection: float = 1.0,
+    solarCa: float = 0.2,
+    solarCs: float = 0.8,
+    considerAtmosphere: bool = True,
+    atmosphereCrossSection: float = 1.0,
+    atmosphereDragCoeff: float = 2.2,
+    bodies: list = ["sun", "moon", "jupiter"],
+    **kwargs
+) -> Propagator:
     """
     Generate a propagator from an Orbit definition
 
@@ -169,49 +211,66 @@ def _(orbit:Orbit, attitudeProvider:AttitudeProvider=None, mass:float=100.,
     """
     if context is None:
         context = DataContext.getDefault()
-    
+
     if centralBody is None:
-        centralBody = referenceEllipsoid("wgs84", frameName="itrf", simpleEop=False, iersConventions="iers2010")
-    
-    tolerances = NumericalPropagator.tolerances(positionTolerance, orbit, orbit.getType())
-    integrator = DormandPrince853Integrator(minStep, maxStep, orekit.JArray('double').cast_(tolerances[0]), orekit.JArray('double').cast_(tolerances[1]))
-    
+        centralBody = OrekitUtils.referenceEllipsoid(
+            "wgs84", frameName="itrf", simpleEop=False, iersConventions="iers2010"
+        )
+
+    tolerances = NumericalPropagator.tolerances(
+        positionTolerance, orbit, orbit.getType()
+    )
+    integrator = DormandPrince853Integrator(
+        minStep,
+        maxStep,
+        orekit.JArray("double").cast_(tolerances[0]),
+        orekit.JArray("double").cast_(tolerances[1]),
+    )
+
     propagator = NumericalPropagator(integrator)
-    propagator.setOrbitType(OrbitType.CIRCULAR)# orbit.getType())
-    
+    propagator.setOrbitType(OrbitType.CIRCULAR)  # orbit.getType())
+
     if considerGravity:
-        gravityProvider = GravityFieldFactory.getNormalizedProvider(gravityFieldDegree, gravityFieldOrder)
-        gravityForceModel = HolmesFeatherstoneAttractionModel(centralBody.getBodyFrame(), gravityProvider)
+        gravityProvider = GravityFieldFactory.getNormalizedProvider(
+            gravityFieldDegree, gravityFieldOrder
+        )
+        gravityForceModel = HolmesFeatherstoneAttractionModel(
+            centralBody.getBodyFrame(), gravityProvider
+        )
         propagator.addForceModel(gravityForceModel)
-    
+
     if considerSolarPressure:
         if sun is None:
             sun = context.getCelestialBodies().getSun()
-            
-        convention = IsotropicRadiationClassicalConvention(solarPressureCrossSection, solarCa, solarCs)
-        solarPressure = SolarRadiationPressure(sun, centralBody.getEquatorialRadius(), convention)
+
+        convention = IsotropicRadiationClassicalConvention(
+            solarPressureCrossSection, solarCa, solarCs
+        )
+        solarPressure = SolarRadiationPressure(
+            sun, centralBody.getEquatorialRadius(), convention
+        )
         propagator.addForceModel(solarPressure)
-    
+
     if considerAtmosphere:
         if sun is None:
             sun = context.getCelestialBodies().getSun()
-            
+
         atmosphere = HarrisPriester(sun, centralBody)
         drag = IsotropicDrag(atmosphereCrossSection, atmosphereDragCoeff)
         dragForce = DragForce(atmosphere, drag)
         propagator.addForceModel(dragForce)
-    
+
     if not bodies is None:
         for bodyName in bodies:
             body = context.getCelestialBodies().getBody(bodyName)
             if not body is None:
                 propagator.addForceModel(ThirdBodyAttraction(body))
-    
+
     initialState = SpacecraftState(orbit)
     propagator.setInitialState(initialState)
-    
+
     if attitudeProvider is None:
         attitudeProvider = InertialProvider.of(initialState.getFrame())
     propagator.setAttitudeProvider(attitudeProvider)
-    
+
     return propagator

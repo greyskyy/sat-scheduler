@@ -1,4 +1,6 @@
 .data
+.build
+
 *.html
 
 __pycache__
