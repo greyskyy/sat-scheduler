@@ -2,15 +2,15 @@ name: sat-scheduler
 channels:
   - conda-forge
 dependencies:
-  - numpy=1.23.0
-  - pyyaml=6.0
-  - astropy=5.1
-  - isodate=0.6.1
+  - numpy
+  - pyyaml
+  - astropy
+  - isodate
   - orekit=11.2
-  - shapely=1.7.0
-  - pip=21.2.4
-  - geopandas=0.10.2
-  - folium=0.12.1.post1
+  - shapely
+  - pip
+  - geopandas
+  - folium
   - python=3.10.4
   # dev dependencies
   - pytest
