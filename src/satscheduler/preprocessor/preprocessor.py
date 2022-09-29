@@ -226,19 +226,19 @@ class Preprocessor:
         self.logger.critical(
             "Starting work for %s over timespan %s ", self.sat.id, self.interval
         )
-        
+
         generator = EphemerisGenerator(propagator)
 
         # set the propagator at the start time before we do anything else
         ephemerisInterval = self.interval.pad(timedelta(minutes=5))
-        
+
         # propagate the initial period
-        generator.propagate(DateInterval(ephemerisInterval.start, self.interval.start), self.stepSeconds)
+        generator.propagate(
+            DateInterval(ephemerisInterval.start, self.interval.start), self.stepSeconds
+        )
 
-        
-        #ephemeris = EphemerisGenerator.generate(propagator, ephemerisInterval, step=self.stepSeconds)
+        # ephemeris = EphemerisGenerator.generate(propagator, ephemerisInterval, step=self.stepSeconds)
 
-        
         """ move to a graphics component
         print("registring for events")
         # register an event detector to avoid line wrapping on the map
@@ -296,7 +296,7 @@ class Preprocessor:
                 break
 
         generator.propagate(self.interval, self.stepSeconds)
-        #self._propagate(propagator)
+        # self._propagate(propagator)
         """
         # do the work
         propTime = self.interval.stop.durationFrom(self.interval.start)
@@ -329,7 +329,9 @@ class Preprocessor:
         """
 
         propagator.clearEventsDetectors()
-        generator.propagate(DateInterval(self.interval.stop, ephemerisInterval.stop), self.stepSeconds)
+        generator.propagate(
+            DateInterval(self.interval.stop, ephemerisInterval.stop), self.stepSeconds
+        )
 
         self.logger.info("Completed work for %s", self.sat.id)
         self.__last_result = PreprocessingResult(

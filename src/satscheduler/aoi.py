@@ -1,10 +1,12 @@
 """
 Container to load and manage AOIs within the 
 """
+from typing import Iterable
 from astropy import units
 from numpy import isin
 from pyproj import CRS
 from satscheduler.dataloader import download
+from orekitfactory.utils import validate_quantity
 
 import shapely
 import shapely.geometry
@@ -164,30 +166,7 @@ class Aoi:
         Returns:
             list[SphericalPolygonsSet]: The list of polygon sets
         """
-        gdf = self.to_gdf()
-
-        # project to equal-area
-        gdf = gdf.to_crs(
-            "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
-        # gs = gdf.buffer(buffer)
-        gs = gdf.geometry
-        if tolerance.value > 0:
-            gs = gs.simplify(tolerance.to_value(units.m))
-        gs = gs.to_crs(self.crs)
-
-        zones = []
-        for p in _polygons(gs):
-            ccw = shapely.geometry.polygon.orient(
-                Polygon(shell=p.exterior)
-            )  # not sure this should go here
-
-            try:
-                zones.append(_toZone(ccw))
-            except BaseException as e:
-                print(f"Caught exception building zone for {self.id} error: {e}")
-
-        return zones
+        return _toZone(self.polygon)
 
 
 def loadIntoGdf(
@@ -240,7 +219,7 @@ def _toZone(polygon: Polygon) -> SphericalPolygonsSet:
             ):
                 continue
 
-        if p[1] >= -90 and p[1] <= 90:
+        if p[1] > -90 and p[1] < 90:
             points.append(
                 GeodeticPoint(FastMath.toRadians(p[1]), FastMath.toRadians(p[0]), 0.0)
             )  # put lon,lat into lat,lon order
@@ -248,30 +227,6 @@ def _toZone(polygon: Polygon) -> SphericalPolygonsSet:
         prev = p
 
     return EllipsoidTessellator.buildSimpleZone(float(1.0e-10), points)
-
-
-def _polygons(geometry) -> Generator[Polygon]:
-    """Split a geometry into a series of valid polygons.
-
-    Args:
-        geometry (Polygon|MultiPolygon|GeoSeries): The polygon(s) to enumerate.
-        make_valid (bool, optional): If a polygon is not valid, try to make it valid. Defaults to True.
-
-    Yields:
-        Generator[Polygon]: The enumeration of valid polygons.
-    """
-    if isinstance(geometry, Polygon):
-        yield geometry
-    elif isinstance(geometry, MultiPolygon):
-        for g in geometry.geoms:
-            yield from _polygons(g)
-    elif isinstance(geometry, GeoSeries):
-        for g in geometry:
-            yield from _polygons(g)
-    else:
-        raise ValueError(
-            f"cannot generate polygon from unsupported type: {type(geometry)}"
-        )
 
 
 def _buildAoi(
@@ -282,7 +237,7 @@ def _buildAoi(
     continent: str = None,
     country: str = None,
     crs: CRS = None,
-) -> Generator[Aoi]:
+) -> Aoi:
     """Build an AOI from the provided geometry
 
     Args:
@@ -299,96 +254,25 @@ def _buildAoi(
     Yields:
         Generator[Aoi]: A generator enumerating all the AOIs built from this geometry
     """
-    if isinstance(geometry, GeoSeries):
-        if geometry.size == 1:
-            yield from _buildAoi(
-                geometry.iloc[0],
-                id,
-                alpha2=alpha2,
-                alpha3=alpha3,
-                country=country,
-                continent=continent,
-                crs=crs,
-            )
-        else:
-            idx = 0
-            for g in geometry.geoms:
-                yield from _buildAoi(
-                    g,
-                    f"{id}_{idx}",
-                    alpha2=alpha2,
-                    alpha3=alpha3,
-                    country=country,
-                    continent=continent,
-                    crs=crs,
-                )
-                idx = idx + 1
-    elif isinstance(geometry, Polygon):
-        fixed = antimeridian.split(geometry)
-        if fixed:
-            yield from _buildAoi(
-                fixed,
-                id,
-                alpha2=alpha2,
-                alpha3=alpha3,
-                country=country,
-                continent=continent,
-                crs=crs,
-            )
-        else:
-            ccw = shapely.geometry.polygon.orient(Polygon(shell=geometry.exterior))
-            if crs is None:
-                crs = CRS.from_string("+proj=longlat +datum=WGS84 +no_defs")
+    ccw = shapely.geometry.polygon.orient(Polygon(shell=geometry.exterior))
 
-            frame = GeoDataFrame(
-                data={
-                    "ISO_A2": [alpha2],
-                    "ISO_A3": [alpha3],
-                    "country": [country],
-                    "continent": [continent],
-                    "geometry": [ccw],
-                },
-                crs=crs,
-            )
-
-            yield Aoi(
-                id.replace(" ", "_"),
-                polygon=ccw,
-                alpha2=alpha2,
-                alpha3=alpha3,
-                country=country,
-                continent=continent,
-                crs=crs,
-            )
-    elif isinstance(geometry, MultiPolygon):
-        fixed = antimeridian.split_multipolygon(geometry)
-        if fixed:
-            geometry = fixed
-
-        idx = 0
-        for g in _polygons(geometry):
-            yield from _buildAoi(
-                g,
-                f"{id}_{idx}".replace(" ", "_"),
-                alpha2=alpha2,
-                alpha3=alpha3,
-                country=country,
-                continent=continent,
-                crs=crs,
-            )
-            idx = idx + 1
-    else:
-        raise ValueError(
-            f"cannot create aoi from invalid geometry type: {type(geometry)}"
-        )
+    return Aoi(
+        id.replace(" ", "_"),
+        polygon=ccw,
+        alpha2=alpha2,
+        alpha3=alpha3,
+        country=country,
+        continent=continent,
+        crs=crs,
+    )
 
 
-@units.quantity_input()
 def loadAois(
     sourceUrl: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",
     bbox: tuple[float, float, float, float] = None,
-    buffer: units.Quantity[units.m] = 20000 * units.m,
-    tolerance: units.Quantity[units.m] = 1000 * units.m,
+    buffer: units.Quantity[units.m] | float | str = 20000 * units.m,
+    tolerance: units.Quantity[units.m] | float | str = 1000 * units.m,
+    **kwargs
 ) -> list[Aoi]:
     """Load the AOIs from the source as a list of Aoi objects.
 
@@ -408,6 +292,9 @@ def loadAois(
     logger = logging.getLogger(__name__)
     logger.debug("loading aois from %s", sourceUrl)
 
+    buffer = validate_quantity(buffer, units.m)
+    tolerance = validate_quantity(tolerance, units.m)
+
     # build a bounding box, if one is loaded
     box = None
     if bbox is not None:
@@ -423,10 +310,26 @@ def loadAois(
     crs = gdf.crs
 
     if crs is None:
+
         crs = CRS.from_string("+proj=longlat +datum=WGS84 +no_defs")
+        gdf.set_crs(crs)
+
+    # buffer
+    gdf.to_crs("EPSG:3857", inplace=True)
+    gds = gdf.buffer(buffer.to_value(units.m))
+    gdf.geometry = gds
+    gdf.to_crs(crs, inplace=True)
+
+    # explode the multi-geometries
+    gdf = gdf.explode(ignore_index=True)
+
+    lonspan = gdf.bounds["maxx"] - gdf.bounds["minx"]
+    mask = lonspan > 150
+
+    gdf.loc[mask, "geometry"] = gdf.loc[mask, "geometry"].apply(antimeridian.split)
+    gdf = gdf.explode(ignore_index=True)
 
     aois = []
-    count = 0
     for index, row in gdf.iterrows():
         continent = row["CONTINENT"]
         country = row["ADMIN"]
@@ -434,42 +337,10 @@ def loadAois(
         alpha3 = row["ISO_A3"]
         geometry = gdf.geometry[index]
 
-        # buffer the area
-        frame = GeoDataFrame(
-            data={
-                "ADMIN": [country],
-                "ISO_A2": [alpha2],
-                "ISO_A3": [alpha3],
-                "CONTINENT": [continent],
-                "geometry": [geometry],
-            },
-            crs="+proj=longlat +datum=WGS84 +no_defs",
-        )
-
-        frame = frame.to_crs(
-            "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
-        frame = frame.buffer(buffer.to_value(units.m))
-        frame = frame.to_crs(crs)
-
-        if frame.geometry.is_valid.bool():
-            geometry = frame.geometry
-        else:
-            logger.warn(
-                "Invalid buffered geometry, using unbuffered geometry for continent=%s country=%s",
-                continent,
-                country,
-            )
-
-        # splits = frame.apply(antimeridian.fix_item)
-        # frame.loc[splits.dropna().index, "geometry"] = splits
-
-        count = count + 1
-
-        aois.extend(
+        aois.append(
             _buildAoi(
                 geometry,
-                country.replace(" ", "_"),
+                continent.replace(" ", "_") + str(index),
                 country=country,
                 alpha2=alpha2,
                 alpha3=alpha3,

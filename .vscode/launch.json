@@ -13,7 +13,7 @@
             "program": "src/",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["--run-tool", "list_aoi"]
+            "args": []
         },
         {
             "name": "Python: preprocess",
