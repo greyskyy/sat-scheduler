@@ -3,12 +3,12 @@ from datetime import timedelta
 from typing import Iterable
 
 from functools import cached_property
-from satscheduler.utils import DateIntervalList, SafeListBuilder, DateInterval
+from orekitfactory.time import DateIntervalList, DateIntervalListBuilder, DateInterval
 from .linebuilder import LineBuilder
 from .nadirtrace import NadirTrace
 from satscheduler.aoi import Aoi
 
-from satscheduler.utils import OrekitUtils, EphemerisGenerator
+from satscheduler.utils import EphemerisGenerator
 
 from org.hipparchus.ode.events import Action
 from org.hipparchus.util import FastMath
@@ -26,6 +26,8 @@ from org.orekit.propagation.events import (
 from org.orekit.propagation.events.handlers import PythonEventHandler
 
 from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
+
+import orekitfactory.factory
 
 import logging
 import isodate
@@ -103,13 +105,13 @@ class AoiHandler(PythonEventHandler):
         aoi: Aoi,
         sat: Satellite,
         sensor: CameraSensor,
-        builder: SafeListBuilder = None,
+        builder: DateIntervalListBuilder = None,
     ):
         super().__init__()
         self.__aoi = aoi
         self.__sat = sat
         self.__sensor = sensor
-        self.__builder = builder if builder else SafeListBuilder()
+        self.__builder = builder if builder else DateIntervalListBuilder()
         self.__logger = logging.getLogger(self.__class__.__name__)
 
     def init(self, initialstate, target, detector):
@@ -189,8 +191,8 @@ class Preprocessor:
     @property
     def centralBody(self) -> ReferenceEllipsoid:
         if not self.__centralBody:
-            self.__centralBody = OrekitUtils.referenceEllipsoid(
-                "wgs84",
+            self.__centralBody = orekitfactory.factory.get_reference_ellipsoid(
+                model="wgs84",
                 frameName="itrf",
                 simpleEop=False,
                 iersConventions="iers2010",
@@ -274,18 +276,20 @@ class Preprocessor:
                 aoi=aoi,
                 sat=self.sat,
                 sensor=sensor,
-                builder=SafeListBuilder(self.interval.start, self.interval.stop),
+                builder=DateIntervalListBuilder(
+                    self.interval.start, self.interval.stop
+                ),
             )
             handlers.append(handler)
 
             try:
                 self.logger.debug("Registring for aoi: %s", aoi.id)
-                for zone in aoi.createZones():
-                    propagator.addEventDetector(
-                        FootprintOverlapDetector(
-                            fov, self.centralBody, zone, 10000.0
-                        ).withHandler(handler)
-                    )
+                zone = aoi.createZones()
+                propagator.addEventDetector(
+                    FootprintOverlapDetector(
+                        fov, self.centralBody, zone, 10000.0
+                    ).withHandler(handler)
+                )
             except BaseException as e:
                 self.logger.warning(
                     "Caught exception building zones, skipping %s", aoi.id, exc_info=e

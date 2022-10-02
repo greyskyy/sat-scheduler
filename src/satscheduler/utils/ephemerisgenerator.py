@@ -5,7 +5,7 @@ from org.orekit.time import AbsoluteDate
 from org.orekit.attitudes import InertialProvider
 from java.util import ArrayList
 
-from satscheduler.utils import DateInterval
+from orekitfactory.time import DateInterval
 
 ZERO_TIMEDELTA = timedelta()
 

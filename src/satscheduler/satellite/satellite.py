@@ -6,10 +6,10 @@ from astropy.units import Quantity
 from dataclasses import dataclass
 from requests import get
 
-from satscheduler.utils import OrekitUtils, FixedTransformProvider
+from satscheduler.utils import FixedTransformProvider
 
 import logging
-from satscheduler.propagator import buildOrbit, buildTle, buildPropagator
+
 from org.orekit.propagation import BoundedPropagator
 
 from org.hipparchus.geometry.euclidean.threed import (
@@ -37,8 +37,11 @@ from org.orekit.frames import (
 
 from org.orekit.geometry.fov import DoubleDihedraFieldOfView, FieldOfView
 from org.orekit.models.earth import ReferenceEllipsoid
+from org.orekit.orbits import OrbitType
 from org.orekit.propagation import Propagator
 from org.orekit.time import AbsoluteDate
+
+import orekitfactory.factory
 
 
 @dataclass(frozen=True)
@@ -72,11 +75,11 @@ class Sensor:
 
         if not data.frame is None:
             fdata = FrameData(**(data.frame))
-            tx = OrekitUtils.toVector(fdata.translation)
-            r = OrekitUtils.toRotation(
-                x=OrekitUtils.toVector(fdata.x),
-                y=OrekitUtils.toVector(fdata.y),
-                z=OrekitUtils.toVector(fdata.z),
+            tx = orekitfactory.factory.to_vector(fdata.translation)
+            r = orekitfactory.factory.to_rotation(
+                x=orekitfactory.factory.to_vector(fdata.x),
+                y=orekitfactory.factory.to_vector(fdata.y),
+                z=orekitfactory.factory.to_vector(fdata.z),
             )
 
             self.__bodyToSensor = FixedTransformProvider(tx=tx, r=r)
@@ -264,7 +267,7 @@ class Satellite:
             context = DataContext.getDefault()
 
         if earth is None:
-            earth = OrekitUtils.referenceEllipsoid()
+            earth = orekitfactory.factory.get_reference_ellipsoid(context=context)
 
         # Build the propagator
         if "catnr" in self.__config:
@@ -280,28 +283,35 @@ class Satellite:
                 raise RuntimeError(f"failed to load TLE for catalog number {catnr}")
 
             data = r.content.splitlines()
-            tle = buildTle(line1=data[1], line2=data[2], context=context)
+            tle = orekitfactory.factory.to_tle(
+                line1=data[1], line2=data[2], context=context
+            )
             self._initAttitudes(context.getFrames().getTEME(), context, earth)
             atProv = self.getAttitudeProvider("mission")
-            self.__propagator = buildPropagator(
+            self.__propagator = orekitfactory.factory.to_propagator(
                 tle, mass=self.mass, context=context, attitudeProvider=atProv
             )
         elif "tle" in self.__config:
-            tle = buildTle(**(self.__config["tle"]), context=context)
+            tle = orekitfactory.factory.to_tle(
+                **(self.__config["tle"]), context=context
+            )
             self._initAttitudes(context.getFrames().getTEME(), context, earth)
             atProv = self.getAttitudeProvider("mission")
-            self.__propagator = buildPropagator(
+            self.__propagator = orekitfactory.factory.to_propagator(
                 tle, mass=self.mass, context=context, attitudeProvider=atProv
             )
         elif "keplerian" in self.__config:
-            orbit = buildOrbit(**(self.__config["keplerian"]), context=context)
+            orbit = orekitfactory.factory.to_orbit(
+                **(self.__config["keplerian"]), context=context
+            )
             self._initAttitudes(orbit.getFrame(), context, earth)
             atProv = self.getAttitudeProvider("mission")
-            self.__propagator = buildPropagator(
+            self.__propagator = orekitfactory.factory.to_propagator(
                 orbit,
                 mass=self.mass,
                 context=context,
                 attitudeProvider=atProv,
+                orbitType=OrbitType.CARTESIAN,
                 **(self.__config),
             )
         else:
@@ -349,10 +359,22 @@ class Satellite:
             lofType = self.lofType
 
         if "tx" in data:
-            x = OrekitUtils.toVector(data["tx"]["x"]) if "x" in data["tx"] else None
-            y = OrekitUtils.toVector(data["tx"]["y"]) if "y" in data["tx"] else None
-            z = OrekitUtils.toVector(data["tx"]["z"]) if "z" in data["tx"] else None
-            rot = OrekitUtils.toRotation(x, y, z)
+            x = (
+                orekitfactory.factory.to_vector(data["tx"]["x"])
+                if "x" in data["tx"]
+                else None
+            )
+            y = (
+                orekitfactory.factory.to_vector(data["tx"]["y"])
+                if "y" in data["tx"]
+                else None
+            )
+            z = (
+                orekitfactory.factory.to_vector(data["tx"]["z"])
+                if "z" in data["tx"]
+                else None
+            )
+            rot = orekitfactory.factory.to_rotation(x, y, z)
         else:
             rot = Rotation.IDENTITY
 

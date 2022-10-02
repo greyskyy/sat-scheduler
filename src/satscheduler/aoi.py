@@ -5,7 +5,7 @@ from typing import Iterable
 from astropy import units
 from numpy import isin
 from pyproj import CRS
-from satscheduler.dataloader import download
+from orekitfactory.utils import Dataloader
 from orekitfactory.utils import validate_quantity
 
 import shapely
@@ -183,7 +183,7 @@ def loadIntoGdf(
         geopandas.GeoDataFrame: The data frame
     """
     # download the source file
-    filepath = download(sourceUrl)
+    filepath = Dataloader.download(url=sourceUrl)
 
     # read the fille
     gdf = geopandas.read_file(filepath, bbox=bbox)

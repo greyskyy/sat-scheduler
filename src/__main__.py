@@ -15,6 +15,13 @@ else:
 if __name__ == "__main__":
     pyrebar.Plugins.add_entrypoint(
         EntryPoint(
+            name="satsched-init",
+            value="satscheduler.initialize:pre_init",
+            group=pyrebar.Plugins.PREINIT_GROUP,
+        )
+    )
+    pyrebar.Plugins.add_entrypoint(
+        EntryPoint(
             name="satsched-addargs",
             value="satscheduler.configuration:add_args",
             group=pyrebar.Plugins.PREINIT_GROUP,
@@ -31,6 +38,14 @@ if __name__ == "__main__":
         EntryPoint(
             name="aoi-tool",
             value="satscheduler.tools.aoitool",
+            group=pyrebar.Plugins.APP_GROUP,
+        )
+    )
+
+    pyrebar.Plugins.add_entrypoint(
+        EntryPoint(
+            name="preprocessor",
+            value="satscheduler.tools.preprocess",
             group=pyrebar.Plugins.APP_GROUP,
         )
     )

@@ -1,19 +1,34 @@
-from concurrent.futures import process
+"""Execute the pre-processor, provide stats on results."""
+import argparse
 from datetime import timedelta
 from functools import reduce
-import satscheduler.aoi as aoi
 import satscheduler.preprocessor as pre_processor
-from satscheduler.satellite import Satellites
 
 import logging
 
-from satscheduler.utils import DateInterval, string_to_absolutedate, OrekitUtils
-from org.orekit.data import DataContext
-
 import folium
+import orekitfactory.initializer
+
+from ..configuration import get_config
+
+SUBCOMMAND = "preprocess"
+ALIASES = ["prep"]
+LOGGER_NAME = "satscheduler"
 
 
-def preprocess(args=None, config=None, vm=None):
+def config_args(parser):
+    parser.add_argument(
+        "--multi-threading",
+        action=argparse.BooleanOptionalAction,
+        dest="threading",
+        help="Run with multi-threading. Overrides the value set in the config.",
+    )
+    parser.add_argument(
+        "--test", help="Run in test-mode.", action="store_true", default=False
+    )
+
+
+def execute(args=None):
     """Load the AOIs, generating a summary + map plot.
 
     Args:
@@ -22,6 +37,8 @@ def preprocess(args=None, config=None, vm=None):
         vm (_type_, optional): A reference to the orekit virtual machine. Defaults to None.
     """
     logger = logging.getLogger(__name__)
+    config = get_config()
+    vm = orekitfactory.initializer.get_orekit_vm()
 
     logger.info("Starting preprocessor tool.")
 

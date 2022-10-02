@@ -8,6 +8,7 @@ from ..configuration import get_config
 
 SUBCOMMAND = "list-aois"
 ALIASES = ["aois", "la"]
+LOGGER_NAME = "satscheduler"
 
 
 def config_args(parser):

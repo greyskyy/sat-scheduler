@@ -6,4 +6,4 @@ from satscheduler.preprocessor.preprocessor import (
     PreprocessedAoi,
 )
 
-from satscheduler.preprocessor.runner import execute_preprocessing as execute
+from satscheduler.preprocessor.runner import execute

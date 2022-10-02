@@ -1,5 +1,3 @@
-from datetime import timedelta
-from functools import reduce
 from threading import Thread
 from typing import Iterable
 import satscheduler.aoi as aoi
@@ -7,10 +5,12 @@ from satscheduler.preprocessor import Preprocessor, PreprocessingResult
 from satscheduler.satellite import Satellites
 
 import logging
-from ..tools.preprocess import preprocess
 
-from satscheduler.utils import DateInterval, string_to_absolutedate, OrekitUtils
 from org.orekit.data import DataContext
+
+import orekitfactory.factory
+import orekitfactory.utils
+import orekitfactory.time
 
 
 class Worker:
@@ -79,7 +79,7 @@ def run_preprocessing(
     return [p.last_result for p in preprocessors]
 
 
-def execute_preprocessing(
+def execute(
     args=None, config=None, vm=None, context: DataContext = None
 ) -> list[PreprocessingResult]:
     """Execute preprocessing.
@@ -96,7 +96,7 @@ def execute_preprocessing(
     logger.info("Loading aoi and satellite data.")
 
     # load the aois
-    aois = aoi.loadAois(sourceUrl=config["aois"]["url"])
+    aois = aoi.loadAois(**config["aois"])
     logger.debug("Loaded %d aois", len(aois))
 
     # load the satellites
@@ -107,16 +107,20 @@ def execute_preprocessing(
     if context is None:
         context = DataContext.getDefault()
 
-    timespan = DateInterval(
-        string_to_absolutedate(config["run"]["start"], context=context),
-        string_to_absolutedate(config["run"]["stop"], context=context),
+    timespan = orekitfactory.time.DateInterval(
+        orekitfactory.factory.to_absolute_date(config["run"]["start"], context=context),
+        orekitfactory.factory.to_absolute_date(config["run"]["stop"], context=context),
     )
 
     # load the reference ellipsoid
     if "earth" in config:
-        earth = OrekitUtils.referenceEllipsoid(context=context, **(config["earth"]))
+        earth = orekitfactory.factory.get_reference_ellipsoid(
+            context=context, **(config["earth"])
+        )
     else:
-        earth = OrekitUtils.referenceEllipsoid(model="wgs-84", context=context)
+        earth = orekitfactory.factory.get_reference_ellipsoid(
+            model="wgs-84", context=context
+        )
 
     # create the preprocessors
     step = config["control"]["step"]
