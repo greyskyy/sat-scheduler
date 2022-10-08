@@ -11,6 +11,7 @@ dependencies:
   - orekit>=11.2
   - pyyaml
   - shapely
+  - czml3
   
   # dev dependencies
   - pytest

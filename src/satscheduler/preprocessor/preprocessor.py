@@ -42,61 +42,6 @@ class PreprocessedAoi:
     intervals: DateIntervalList
 
 
-class LongitudeWrapHandler(PythonEventHandler):
-    """Orbit event handler, detecting a wrap around at 180 degrees longitude.
-
-    This handler is used to split the nadir trace, so that it draws properly
-    on the folium map.
-    """
-
-    def __init__(self, tracer: NadirTrace):
-        """Class constructor
-
-        Args:
-            tracer (NadirTrace): The nadir tracer recording the sub-satellite point.
-        """
-        super().__init__()
-        self.__tracer = tracer
-
-    def init(self, initialstate, target, detector):
-        pass
-
-    def resetState(self, detector, oldState):
-        pass
-
-    def eventOccurred(self, s, detector, increasing):
-        try:
-            self.__tracer.addStateAndNewline(s)
-            return Action.CONTINUE
-        except BaseException as e:
-            logging.getLogger(self.__class__.__name__).exception(
-                "Caught exception in longitude handler.", exc_info=e
-            )
-            raise e
-
-
-"""
-class OrbitHandler(PythonEventHandler):
-    def __init__(self):
-        super().__init__()
-        self.__times = []
-      
-    def init(self, initialstate, target, detector):
-        pass
-
-    def resetState(self, detector, oldState):
-        pass
-    
-    def eventOccurred(self, s, detector, increasing):
-        if increasing:
-            self.__times.append(s.getDate())
-        return Action.CONTINUE
-    
-    @property
-    def 
-"""
-
-
 class AoiHandler(PythonEventHandler):
     """Orbit event handler, handling events when the payload comes into view of an aoi."""
 
@@ -223,13 +168,11 @@ class Preprocessor:
         self.logger.info("Initializing satellite %s", self.sat.id)
         self.sat.init(context=self.context, earth=self.centralBody)
 
-        propagator = self.sat.propagator
-
         self.logger.critical(
             "Starting work for %s over timespan %s ", self.sat.id, self.interval
         )
 
-        generator = EphemerisGenerator(propagator)
+        generator = EphemerisGenerator(self.sat.propagator)
 
         # set the propagator at the start time before we do anything else
         ephemerisInterval = self.interval.pad(timedelta(minutes=5))
@@ -239,60 +182,39 @@ class Preprocessor:
             DateInterval(ephemerisInterval.start, self.interval.start), self.stepSeconds
         )
 
-        # ephemeris = EphemerisGenerator.generate(propagator, ephemerisInterval, step=self.stepSeconds)
-
-        """ move to a graphics component
-        print("registring for events")
-        # register an event detector to avoid line wrapping on the map
-        nadirLine = LineBuilder(
-            **(
-                {"tooltip": item.sat.name, "color": item.sat.displayColor}
-                | item.sat.groundTraceConfig
-            )
-        )
-        nadirTracer = NadirTrace(centralBody, nadirLine)
-        propagator.addEventDetector(
-            LongitudeCrossingDetector(centralBody, FastMath.PI).withHandler(
-                LongitudeWrapHandler(nadirTracer)
-            )
-        )
-        """
-
         # register aoi detectors per sensor
         handlers = []
         count = 0
-        # for sensor in self.sat.sensors:
-        #    fov = sensor.createFovInBodyFrame()
-
-        sensor_idx = 0
-        sensor = self.sat.sensors[sensor_idx]
-        fov = sensor.createFovInBodyFrame()
+        fovs = {s.id: s.createFovInBodyFrame() for s in self.sat.sensors}
 
         # register aoi detectors
         handlers = []
         count = 0
         for aoi in self.aois:
-            handler = AoiHandler(
-                aoi=aoi,
-                sat=self.sat,
-                sensor=sensor,
-                builder=DateIntervalListBuilder(
-                    self.interval.start, self.interval.stop
-                ),
-            )
-            handlers.append(handler)
+            zone = aoi.createZone()
+            if not zone:
+                self.logger.debug("skipping aoi without zone aoi.id=%s", aoi.id)
+                continue
 
-            try:
+            for sensor in self.sat.sensors:
+                fov = fovs[sensor.id]
+
+                handler = AoiHandler(
+                    aoi=aoi,
+                    sat=self.sat,
+                    sensor=sensor,
+                    builder=DateIntervalListBuilder(
+                        self.interval.start, self.interval.stop
+                    ),
+                )
+                handlers.append(handler)
+
                 self.logger.debug("Registring for aoi: %s", aoi.id)
-                zone = aoi.createZones()
-                propagator.addEventDetector(
+
+                self.sat.propagator.addEventDetector(
                     FootprintOverlapDetector(
                         fov, self.centralBody, zone, 10000.0
                     ).withHandler(handler)
-                )
-            except BaseException as e:
-                self.logger.warning(
-                    "Caught exception building zones, skipping %s", aoi.id, exc_info=e
                 )
 
             count = count + 1
@@ -300,39 +222,8 @@ class Preprocessor:
                 break
 
         generator.propagate(self.interval, self.stepSeconds)
-        # self._propagate(propagator)
-        """
-        # do the work
-        propTime = self.interval.stop.durationFrom(self.interval.start)
-        elapsed = 0.0
 
-        self.logger.debug("Propagating over time")
-        while elapsed <= propTime:
-            t = self.interval.start.shiftedBy(elapsed)
-            try:
-                state = propagator.propagate(t)
-                # nadirTracer.addState(state)
-
-                # if activityBuilder.isInActivity:
-                #    activityBuilder.addState(state)
-
-                elapsed += stepSeconds
-            except BaseException as e:
-                self.logger.exception("Caught exception processing sat=%s at time %s.", self.sat.id, t.toString(), exc_info=e)
-                raise e
-        """
-        """
-        nadirLine.finished()
-        if not "show" in item.sat.groundTraceConfig or item.sat.groundTraceConfig["show"]:
-            for l in nadirLine:
-                l.add_to(item.map)
-
-        for a in activityBuilder.activities:
-            if not a.footprint is None:
-                a.add_to(item.map, color="red")
-        """
-
-        propagator.clearEventsDetectors()
+        self.sat.propagator.clearEventsDetectors()
         generator.propagate(
             DateInterval(self.interval.stop, ephemerisInterval.stop), self.stepSeconds
         )
@@ -345,35 +236,3 @@ class Preprocessor:
             sensor=None,
         )
         return self.__last_result
-
-    def _init_propagator(self, propagator: Propagator, ivl: DateInterval = None):
-        if ivl is None:
-            ivl = self.interval
-        self.logger.debug("Initially propagating to %s", ivl.start.toString())
-        propagator.propagate(ivl.start)
-
-    def _propagate(self, propagator: Propagator, ivl: DateInterval = None):
-        if ivl is None:
-            ivl = self.interval
-
-        propTime = ivl.duration_secs
-        elapsed = 0.0
-
-        self.logger.debug("Propagating over time")
-        steps = 0
-        while elapsed <= propTime:
-            t = ivl.start.shiftedBy(elapsed)
-            try:
-                propagator.propagate(t)
-                elapsed += self.stepSeconds
-            except BaseException as e:
-                self.logger.exception(
-                    "Caught exception processing sat=%s at time %s.",
-                    self.sat.id,
-                    t.toString(),
-                    exc_info=e,
-                )
-                raise e
-            steps = steps + 1
-
-        print(f"propagated {steps} steps by {self.stepSeconds} seconds")

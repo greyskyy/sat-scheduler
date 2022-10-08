@@ -158,15 +158,24 @@ class Aoi:
         )
 
     @units.quantity_input
-    def createZones(
+    def createZone(
         self, tolerance: units.Quantity[units.m] = 1000 * units.m
     ) -> SphericalPolygonsSet:
         """Create the spherical polygons set, suitable for payload operations for this aoi.
 
         Returns:
-            list[SphericalPolygonsSet]: The list of polygon sets
+            list[SphericalPolygonsSet]: The spherical polygon set for this AOI, or None if an error was generated.
         """
-        return _toZone(self.polygon)
+        try:
+            return _toZone(self.polygon)
+        except:
+            logging.getLogger(__name__).error(
+                "Error building aoi zone for aoi id=%s.",
+                self.id,
+                exc_info=1,
+                stack_info=1,
+            )
+            return None
 
 
 def loadIntoGdf(
@@ -226,7 +235,7 @@ def _toZone(polygon: Polygon) -> SphericalPolygonsSet:
 
         prev = p
 
-    return EllipsoidTessellator.buildSimpleZone(float(1.0e-10), points)
+    return EllipsoidTessellator.buildSimpleZone(float(1.0e-6), points)
 
 
 def _buildAoi(

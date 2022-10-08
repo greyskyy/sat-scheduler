@@ -1,4 +1,5 @@
-from datetime import timedelta
+import datetime as dt
+
 from org.orekit.propagation import Propagator
 from org.orekit.propagation.analytical import Ephemeris
 from org.orekit.time import AbsoluteDate
@@ -7,24 +8,46 @@ from java.util import ArrayList
 
 from orekitfactory.time import DateInterval
 
-ZERO_TIMEDELTA = timedelta()
+ZERO_TIMEDELTA = dt.timedelta()
+"""Zero seconds, as a timedelta object."""
 
 
-def _as_timedelta(td: float | timedelta) -> timedelta:
-    if isinstance(td, timedelta):
+def _as_timedelta(td: float | dt.timedelta) -> dt.timedelta:
+    """Convert the parameter to a timedelta object.
+
+    Args:
+        td (float | dt.timedelta): the input object, either a timedelta or seconds.
+
+    Returns:
+        dt.timedelta: the time delta object
+    """
+    if isinstance(td, dt.timedelta):
         return td
     else:
-        return timedelta(seconds=td)
+        return dt.timedelta(seconds=td)
 
 
 class EphemerisGenerator:
-    def __init__(self, propagator):
+    def __init__(self, propagator: Propagator):
+        """Class construtor.
+
+        Args:
+            propagator (Propagator): The orbit propagator
+        """
         self.__states = ArrayList()
         self.__propagator = propagator
 
     def propagate(
-        self, interval: DateInterval, step: float | timedelta = timedelta(minutes=1)
+        self,
+        interval: DateInterval,
+        step: float | dt.timedelta = dt.timedelta(minutes=1),
     ):
+        """Propagate ephemeris and create a cached ephemeris.
+
+        Args:
+            interval (DateInterval): The date interval over which to generate ephemeris.
+            step (float | dt.timedelta, optional): The ephemeris timestep. Defaults to dt.timedelta(minutes=1).
+        """
         step = _as_timedelta(step)
 
         steps, part = divmod(interval.duration, step)
@@ -55,7 +78,7 @@ class EphemerisGenerator:
     def generate(
         propagator: Propagator,
         interval: DateInterval,
-        step: float | timedelta = timedelta(minutes=1),
+        step: float | dt.timedelta = dt.timedelta(minutes=1),
     ) -> Ephemeris:
         """Generate an Ephemeris from the provided propagator.
 
@@ -69,6 +92,10 @@ class EphemerisGenerator:
         Returns:
             Ephemeris: The generated ephemeris
         """
+        generator = EphemerisGenerator(propagator=propagator)
+        generator.propagate(interval, step)
+        return generator.build()
+
         step = _as_timedelta(step)
 
         steps, part = divmod(interval.duration, step)
