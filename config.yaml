@@ -8,7 +8,7 @@ aois:
 satellites:
   sat1:
     name: landat-8
-    color: green
+    color: "#00FF00"
     groundTrace:
       show: true
       weight: 1.
@@ -16,7 +16,7 @@ satellites:
     catnr: 39084
   sat2:
     name: landsat-9
-    color: teal
+    color: "#00FFFF"
     groundTrace:
       show: true
       weight: 1.
@@ -26,7 +26,7 @@ satellites:
       line2: 2 49260  98.2276 237.1831 0001142  78.2478 281.8849 14.57099002 38060
   sat3:
     name: Test-1
-    color: purple
+    color: "#800080"
     groundTrace:
       show: true
       weight: 1.

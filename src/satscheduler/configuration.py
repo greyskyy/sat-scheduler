@@ -38,6 +38,7 @@ def load_config(args: argparse.Namespace):
                 logger.info("Loaded configuration file path=%s", args.config)
         except:
             logger.warn("Failed to load configuration path=%s", args.config, exc_info=1)
+            config = {}
     else:
         logger.warn("No configuration file found in command line arguments.")
 

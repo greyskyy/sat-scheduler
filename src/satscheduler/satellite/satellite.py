@@ -256,6 +256,21 @@ class Satellite:
     def sensors(self) -> tuple[Sensor]:
         return self.__sensors
 
+    def sensor(self, id: str) -> Sensor:
+        """Locate the sensor with the defined id.
+
+        Args:
+            id (str): The sensor id.
+
+        Returns:
+            Sensor: the sensor, or None if no sensor matches the id.
+        """
+        for s in self.__sensors:
+            if s.id == id:
+                return s
+
+        return None
+
     def getAttitudeProvider(self, name: str = None) -> AttitudeProvider:
         if name is None:
             return self.__attitudes[self.__defaultAtLaw]

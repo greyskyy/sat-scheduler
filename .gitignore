@@ -3,6 +3,7 @@
 
 *.html
 *.czml
+*.csv
 
 __pycache__
 **/__pycache__

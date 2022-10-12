@@ -183,19 +183,17 @@ def aoi_to_czml(aoi: Aoi, zones: bool = False, config: dict = {}) -> czml3.Packe
         id=f"aoi/{aoi.id}",
         name=aoi.id,
         label=label,
-        polygon=OutlinedPolygon(
+        polyline=czml3.properties.Polyline(
             positions=positions,
             material=czml3.properties.Material(
-                solidColor=czml3.properties.SolidColorMaterial(color=label.fillColor),
                 polylineOutline=czml3.properties.PolylineOutlineMaterial(
-                    color=label.fillColor
+                    color=label.fillColor,
+                    outlineColor=label.fillColor,
+                    outlineWidth=3
                 ),
             ),
             arcType=czml3.enums.ArcTypes.GEODESIC,
-            fill=False,
-            outline=True,
-            outlineColor=label.fillColor,
-            outlineWidth=10,
+            zIndex=10
         ),
         position=czml3.properties.Position(
             cartographicDegrees=[

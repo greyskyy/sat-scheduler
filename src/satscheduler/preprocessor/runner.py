@@ -1,3 +1,7 @@
+"""Preprocessing executor.
+
+Manage the loading and threaded execution of preprocessing across multiple satellites.
+"""
 from threading import Thread
 from typing import Iterable
 import satscheduler.aoi as aoi
@@ -46,22 +50,22 @@ def run_preprocessing(
         list[PreprocessedAoi]: The preproessing results
     """
     shouldThread = True
-    if args and args.threading is not None:
+    if args and "threading" in args and args.threading is not None:
         shouldThread = args.threading
     elif config and "run" in config and "multithread" in config["run"]:
         shouldThread = config["run"]["multithread"]
-
-    logging.getLogger(__name__).debug(
-        "Executing %d preprocessors [multithreading=%s]",
-        len(preprocessors),
-        shouldThread,
-    )
 
     if shouldThread and len(preprocessors) < 2:
         shouldThread = False
         logging.getLogger(__name__).debug(
             "Disabling preprocessing threading for a single preprocessor."
         )
+
+    logging.getLogger(__name__).debug(
+        "Executing %d preprocessors [multithreading=%s]",
+        len(preprocessors),
+        shouldThread,
+    )
 
     if shouldThread:
         threads = []
@@ -80,7 +84,7 @@ def run_preprocessing(
 
 
 def execute(
-    args=None, config=None, vm=None, context: DataContext = None
+    args=None, config={}, vm=None, context: DataContext = None
 ) -> list[PreprocessingResult]:
     """Execute preprocessing.
 
@@ -92,6 +96,8 @@ def execute(
         vm (_type_, optional): A reference to the orekit virtual machine. Defaults to None.
     """
     logger = logging.getLogger(__name__)
+    if config is None:
+        raise ValueError("config dictionary cannot be none.")
 
     logger.info("Loading aoi and satellite data.")
 

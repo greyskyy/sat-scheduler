@@ -1,45 +1,52 @@
+"""Scheduling preprocessor. Load AOI and satellite ephemeris, then compute inviews."""
+import logging
+import isodate
+import math
+import numpy as np
+import orekit
+import orekitfactory.factory
+
+
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import cached_property
 from typing import Iterable
 
-from functools import cached_property
 from orekitfactory.time import DateIntervalList, DateIntervalListBuilder, DateInterval
-from .linebuilder import LineBuilder
-from .nadirtrace import NadirTrace
-from satscheduler.aoi import Aoi
 
-from satscheduler.utils import EphemerisGenerator
-
+from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
 from org.hipparchus.ode.events import Action
 from org.hipparchus.util import FastMath
 from org.orekit.data import DataContext
 from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.propagation import BoundedPropagator, Propagator
-from org.orekit.time import AbsoluteDate
-from satscheduler.satellite import CameraSensor, Satellite, ScheduleableSensor
-
-from org.orekit.propagation.events import (
-    LongitudeCrossingDetector,
-    FootprintOverlapDetector,
-    GeographicZoneDetector,
-)
+from org.orekit.propagation.events import FootprintOverlapDetector
 from org.orekit.propagation.events.handlers import PythonEventHandler
+from org.orekit.time import AbsoluteDate
 
-from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
-
-import orekitfactory.factory
-
-import logging
-import isodate
-import numpy as np
+from ..aoi import Aoi
+from ..satellite import CameraSensor, Satellite, ScheduleableSensor
+from ..utils import EphemerisGenerator
 
 
 @dataclass(frozen=True)
 class PreprocessedAoi:
+    """Preprocessing result for a single AOI."""
+
     aoi: Aoi
     sat: Satellite
     sensor: CameraSensor
     intervals: DateIntervalList
+
+
+@dataclass(frozen=True)
+class PreprocessingResult:
+    """Result of preprocessing a single satellite/sensor pair."""
+
+    sensor: ScheduleableSensor
+    sat: Satellite
+    ephemeris: BoundedPropagator
+    aois: tuple[PreprocessedAoi]
 
 
 class AoiHandler(PythonEventHandler):
@@ -89,20 +96,18 @@ class AoiHandler(PythonEventHandler):
         )
 
 
-@dataclass(frozen=True)
-class PreprocessingResult:
-    sensor: ScheduleableSensor
-    sat: Satellite
-    ephemeris: BoundedPropagator
-    aois: tuple[PreprocessedAoi]
-
-
 class Preprocessor:
+    """Satellite scheduler pre-processor.
+
+    Execute this callable to run preprocessing for a single satellite.
+    """
+
     def __init__(
         self,
         interval: DateInterval,
         sat: Satellite,
         aois: Iterable[Aoi],
+        sensor_id: str = None,
         centralBody: ReferenceEllipsoid = None,
         context: DataContext = None,
         step: str = "PT10M",
@@ -114,6 +119,7 @@ class Preprocessor:
         self.__context = context
         self.__step = step or "PT10M"
         self.__last_result = None
+        self.__sensor_id = sensor_id
 
     @property
     def sat(self) -> Satellite:
@@ -151,7 +157,7 @@ class Preprocessor:
 
     @cached_property
     def logger(self) -> logging.Logger:
-        return logging.getLogger(self.__class__.__name__)
+        return logging.getLogger(__name__)
 
     @property
     def last_result(self) -> PreprocessingResult:
@@ -168,7 +174,7 @@ class Preprocessor:
         self.logger.info("Initializing satellite %s", self.sat.id)
         self.sat.init(context=self.context, earth=self.centralBody)
 
-        self.logger.critical(
+        self.logger.info(
             "Starting work for %s over timespan %s ", self.sat.id, self.interval
         )
 
@@ -182,12 +188,15 @@ class Preprocessor:
             DateInterval(ephemerisInterval.start, self.interval.start), self.stepSeconds
         )
 
-        # register aoi detectors per sensor
-        handlers = []
-        count = 0
-        fovs = {s.id: s.createFovInBodyFrame() for s in self.sat.sensors}
+        # filter sensors if necessary
+        sensors = (
+            [self.sat.sensor(self.__sensor_id)]
+            if self.__sensor_id
+            else self.sat.sensors
+        )
+        fovs = {s.id: s.createFovInBodyFrame() for s in sensors}
 
-        # register aoi detectors
+        # register aoi detectors per sensor
         handlers = []
         count = 0
         for aoi in self.aois:
@@ -195,8 +204,11 @@ class Preprocessor:
             if not zone:
                 self.logger.debug("skipping aoi without zone aoi.id=%s", aoi.id)
                 continue
+            
+            sample_dist = math.floor(math.sqrt(aoi.area / 1000))
+            sample_dist = 10000.0 if sample_dist < 10000. else sample_dist
 
-            for sensor in self.sat.sensors:
+            for sensor in sensors:
                 fov = fovs[sensor.id]
 
                 handler = AoiHandler(
@@ -211,11 +223,14 @@ class Preprocessor:
 
                 self.logger.debug("Registring for aoi: %s", aoi.id)
 
-                self.sat.propagator.addEventDetector(
-                    FootprintOverlapDetector(
-                        fov, self.centralBody, zone, 10000.0
-                    ).withHandler(handler)
-                )
+                try:
+                    self.sat.propagator.addEventDetector(
+                        FootprintOverlapDetector(
+                            fov, self.centralBody, zone, float(sample_dist)
+                        ).withHandler(handler)
+                    )
+                except orekit.JavaError:
+                    self.logger.error("Caught exception while building footprint detector for aoi %s with area %f", aoi.id, aoi.area)
 
             count = count + 1
             if test_mode and count > 10:

@@ -1,6 +1,6 @@
 import datetime as dt
 
-from org.orekit.propagation import Propagator
+from org.orekit.propagation import Propagator, SpacecraftState
 from org.orekit.propagation.analytical import Ephemeris
 from org.orekit.time import AbsoluteDate
 from org.orekit.attitudes import InertialProvider
@@ -65,6 +65,11 @@ class EphemerisGenerator:
             t = t.shiftedBy(adjusted_step)
 
     def build(self) -> Ephemeris:
+        for i in range(self.__states.size() - 1, 0, -1):
+            j = i - 1
+            if SpacecraftState.cast_(self.__states.get(i)).getDate().equals(SpacecraftState.cast_(self.__states.get(j)).getDate()):
+                self.__states.remove(i)
+        
         result = Ephemeris(
             self.__states,
             int(2),

@@ -30,7 +30,9 @@ import warnings
 import logging
 from shapely.errors import ShapelyDeprecationWarning
 
+
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 class Aoi:
@@ -48,6 +50,7 @@ class Aoi:
         country: str = None,
         alpha2: str = None,
         alpha3: str = None,
+        area: float = 0
     ):
         """Class construtor
 
@@ -67,6 +70,7 @@ class Aoi:
         self.__country = country
         self.__continent = continent
         self.__crs = crs
+        self.__area = area
 
     @property
     def id(self) -> str:
@@ -137,6 +141,15 @@ class Aoi:
             CRS|Any: The crs of the aoi's polygon, if specified
         """
         return self.__crs
+    
+    @property
+    def area(self) -> float:
+        """The area of this aoi, in square meters.
+        
+        Returns:
+            float: The area of this aoi, in square meters.
+        """
+        return self.__area
 
     def to_gdf(self) -> GeoDataFrame:
         """Create a GeoDataFrame from this AOI
@@ -198,9 +211,8 @@ def loadIntoGdf(
     gdf = geopandas.read_file(filepath, bbox=bbox)
 
     # project to equal-area
-    center = gdf.to_crs(
-        "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-    ).geometry.centroid
+    equal_area = gdf.to_crs("EPSG:3857")
+    center = equal_area.geometry.centroid
     center = center.to_crs("+proj=longlat +datum=WGS84 +no_defs")
 
     gdf["center"] = center
@@ -246,6 +258,7 @@ def _buildAoi(
     continent: str = None,
     country: str = None,
     crs: CRS = None,
+    area: float = 0
 ) -> Aoi:
     """Build an AOI from the provided geometry
 
@@ -273,6 +286,7 @@ def _buildAoi(
         country=country,
         continent=continent,
         crs=crs,
+        area=area
     )
 
 
@@ -319,25 +333,31 @@ def loadAois(
     crs = gdf.crs
 
     if crs is None:
-
         crs = CRS.from_string("+proj=longlat +datum=WGS84 +no_defs")
         gdf.set_crs(crs)
 
     # buffer
+    if buffer > 0 * units.m:
+        gdf.to_crs("EPSG:3857", inplace=True)
+        gds = gdf.buffer(buffer.to_value(units.m))
+        gdf.geometry = gds
+        gdf.to_crs(crs, inplace=True)
+        
+        # explode the multi-geometries
+        gdf = gdf.explode(ignore_index=True)
+
+        lonspan = gdf.bounds["maxx"] - gdf.bounds["minx"]
+        mask = lonspan > 150
+
+        gdf.loc[mask, "geometry"] = gdf.loc[mask, "geometry"].apply(antimeridian.split)
+    gdf = gdf.explode(ignore_index=True)
+    
+    # compute the area
     gdf.to_crs("EPSG:3857", inplace=True)
-    gds = gdf.buffer(buffer.to_value(units.m))
-    gdf.geometry = gds
+    area = gdf.geometry.area
+    gdf["area"] = area
     gdf.to_crs(crs, inplace=True)
-
-    # explode the multi-geometries
-    gdf = gdf.explode(ignore_index=True)
-
-    lonspan = gdf.bounds["maxx"] - gdf.bounds["minx"]
-    mask = lonspan > 150
-
-    gdf.loc[mask, "geometry"] = gdf.loc[mask, "geometry"].apply(antimeridian.split)
-    gdf = gdf.explode(ignore_index=True)
-
+    
     aois = []
     for index, row in gdf.iterrows():
         continent = row["CONTINENT"]
@@ -345,6 +365,7 @@ def loadAois(
         alpha2 = row["ISO_A2"]
         alpha3 = row["ISO_A3"]
         geometry = gdf.geometry[index]
+        a = row["area"]
 
         aois.append(
             _buildAoi(
@@ -355,6 +376,7 @@ def loadAois(
                 alpha3=alpha3,
                 continent=continent,
                 crs=crs,
+                area=a
             )
         )
 
