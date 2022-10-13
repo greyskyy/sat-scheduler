@@ -57,6 +57,7 @@ class SensorData:
     id: str
     type: str
     frame: dict
+    useNadirPointing: bool
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,7 @@ class CameraSensorData(SensorData):
     cols: int
     rows: int
     rowsAlongX: bool
+    
 
 
 class Sensor:
@@ -393,7 +395,7 @@ class Satellite:
         else:
             rot = Rotation.IDENTITY
 
-        angles = rot.getAngles(RotationOrder.XYZ, RotationConvention.FRAME_TRANSFORM)
+        angles = rot.getAngles(RotationOrder.XYZ, RotationConvention.VECTOR_OPERATOR)
         return LofOffset(
             frame, lofType, RotationOrder.XYZ, angles[0], angles[1], angles[2]
         )

@@ -20,7 +20,7 @@ from org.hipparchus.util import FastMath
 from org.orekit.data import DataContext
 from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.propagation import BoundedPropagator, Propagator
-from org.orekit.propagation.events import FootprintOverlapDetector
+from org.orekit.propagation.events import FootprintOverlapDetector, GeographicZoneDetector
 from org.orekit.propagation.events.handlers import PythonEventHandler
 from org.orekit.time import AbsoluteDate
 
@@ -42,11 +42,10 @@ class PreprocessedAoi:
 @dataclass(frozen=True)
 class PreprocessingResult:
     """Result of preprocessing a single satellite/sensor pair."""
-
-    sensor: ScheduleableSensor
     sat: Satellite
     ephemeris: BoundedPropagator
     aois: tuple[PreprocessedAoi]
+    interval: DateInterval
 
 
 class AoiHandler(PythonEventHandler):
@@ -224,11 +223,14 @@ class Preprocessor:
                 self.logger.debug("Registring for aoi: %s", aoi.id)
 
                 try:
-                    self.sat.propagator.addEventDetector(
-                        FootprintOverlapDetector(
-                            fov, self.centralBody, zone, float(sample_dist)
-                        ).withHandler(handler)
-                    )
+                    if sensor.data.useNadirPointing:
+                        detector = GeographicZoneDetector(self.centralBody, zone, FastMath.toRadians(0.5))
+                    else:
+                        detector = FootprintOverlapDetector(
+                                fov, self.centralBody, zone, float(sample_dist)
+                            ).withMaxCheck(60.)
+                        
+                    self.sat.propagator.addEventDetector(detector.withHandler(handler))
                 except orekit.JavaError:
                     self.logger.error("Caught exception while building footprint detector for aoi %s with area %f", aoi.id, aoi.area)
 
@@ -245,9 +247,9 @@ class Preprocessor:
 
         self.logger.info("Completed work for %s", self.sat.id)
         self.__last_result = PreprocessingResult(
-            ephemeris=generator.build(),
+            ephemeris=generator.build(atProv=self.sat.getAttitudeProvider("mission")),
             sat=self.sat,
             aois=tuple(h.result() for h in handlers),
-            sensor=None,
+            interval=self.interval
         )
         return self.__last_result

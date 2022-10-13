@@ -3,7 +3,7 @@ import datetime as dt
 from org.orekit.propagation import Propagator, SpacecraftState
 from org.orekit.propagation.analytical import Ephemeris
 from org.orekit.time import AbsoluteDate
-from org.orekit.attitudes import InertialProvider
+from org.orekit.attitudes import AttitudeProvider, InertialProvider
 from java.util import ArrayList
 
 from orekitfactory.time import DateInterval
@@ -64,17 +64,20 @@ class EphemerisGenerator:
             self.__states.add(self.__propagator.propagate(t))
             t = t.shiftedBy(adjusted_step)
 
-    def build(self) -> Ephemeris:
+    def build(self, atProv:AttitudeProvider=None) -> Ephemeris:
         for i in range(self.__states.size() - 1, 0, -1):
             j = i - 1
             if SpacecraftState.cast_(self.__states.get(i)).getDate().equals(SpacecraftState.cast_(self.__states.get(j)).getDate()):
                 self.__states.remove(i)
         
+        if not atProv:
+            atProv = InertialProvider.of(self.__propagator.getFrame())
+        
         result = Ephemeris(
             self.__states,
             int(2),
             float(0.001),
-            InertialProvider.of(self.__propagator.getFrame()),
+            atProv,
         )
         self.__states = ArrayList()
         return result

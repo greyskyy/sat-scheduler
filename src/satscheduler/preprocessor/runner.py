@@ -142,5 +142,5 @@ def execute(
         vm, preprocessors=preprocessors, args=args, config=config
     )
 
-    logger.critical("Preprocessing completed.")
+    logger.info("Preprocessing completed.")
     return results

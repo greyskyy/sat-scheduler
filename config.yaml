@@ -72,6 +72,7 @@ satellites:
           translation: [0., 0., 0.]
           z: [1, 0, 0]
           x: [0, 1, 0]
+        useNadirPointing: true
       
 earth:
   model: wgs84
