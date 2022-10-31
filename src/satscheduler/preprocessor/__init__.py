@@ -1,6 +1,6 @@
 """Imports for the worker submodule."""
 
-from satscheduler.preprocessor.preprocessor import (
+from .preprocessor import (
     Preprocessor,
     PreprocessingResult,
     PreprocessedAoi,

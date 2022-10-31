@@ -13,7 +13,7 @@
             "program": "src/",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": []
+            "args": ["aois", "--czml"]
         },
         {
             "name": "Python: preprocess",
@@ -22,7 +22,7 @@
             "program": "src/",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["--run-tool", "preprocess", "--debug"]
+            "args": ["preprocess", "--test"]
         }
     ]
 }

@@ -37,7 +37,7 @@ if __name__ == "__main__":
     pyrebar.Plugins.add_entrypoint(
         EntryPoint(
             name="aoi-tool",
-            value="satscheduler.tools.aoitool",
+            value="satscheduler.aoi.tool",
             group=pyrebar.Plugins.APP_GROUP,
         )
     )
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     pyrebar.Plugins.add_entrypoint(
         EntryPoint(
             name="preprocessor",
-            value="satscheduler.tools.preprocess",
+            value="satscheduler.preprocessor.tool",
             group=pyrebar.Plugins.APP_GROUP,
         )
     )

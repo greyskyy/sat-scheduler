@@ -1,10 +1,12 @@
 run:
-  start: '2022-06-17T00:00:00Z'
-  stop: '2022-06-18T00:00:00Z'
+  start: '2022-06-17T08:00:00Z'
+  stop: '2022-06-17T09:30:00Z'
 aois:
   url: https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip
   buffer: "20km"
   color: '#FF0000'
+  filter:
+    ADMIN: Mali
 satellites:
   sat1:
     name: landat-8
@@ -72,7 +74,7 @@ satellites:
           translation: [0., 0., 0.]
           z: [1, 0, 0]
           x: [0, 1, 0]
-        useNadirPointing: true
+        useNadirPointing: false
       
 earth:
   model: wgs84

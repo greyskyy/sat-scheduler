@@ -3,7 +3,7 @@ from functools import cache, cached_property, lru_cache
 from typing import Iterable
 import astropy.units as u
 from astropy.units import Quantity
-from dataclasses import dataclass
+from dataclasses import Field, dataclass
 from requests import get
 
 from satscheduler.utils import FixedTransformProvider
@@ -46,33 +46,59 @@ import orekitfactory.factory
 
 @dataclass(frozen=True)
 class FrameData:
+    """Frame data class."""
+
     translation: list[float] = (0.0, 0.0, 0.0)
+    """The frame's origin, defined in the parent frame."""
     x: list[float] = None
+    """The frame's X-axis, defined in the parent's frame."""
     y: list[float] = None
+    """The frame's Y-axis, defined in the parent's frame."""
     z: list[float] = None
+    """The frame's Z-axis, defined in the parent's frame."""
 
 
 @dataclass(frozen=True)
 class SensorData:
+    """Sensor data class."""
+
     id: str
+    """Unique sensor id."""
     type: str
+    """Sensor type."""
     frame: dict
+    """Dictionary holding data used to construct the FrameData, defining the sensor frame."""
     useNadirPointing: bool
+    """Whether or not to ignore the FoV and use the satellite's nadir point for inviews."""
 
 
 @dataclass(frozen=True)
 class CameraSensorData(SensorData):
+    """Subclass of SensorData, holding data for a camera."""
+
     focalLength: str
+    """Focal length."""
     pitch: str
+    """Camera detector pitch."""
     imgPeriod: str
+    """Imaging period."""
     cols: int
+    """Number of columns, must an integer greater than 0."""
     rows: int
+    """Number of rows, must be an integer greater than 0."""
     rowsAlongX: bool
-    
+    """Flag indicating whether the rows or columns are aligned with +X_sensor."""
 
 
 class Sensor:
+    """Sensor model class."""
+
     def __init__(self, data: SensorData):
+        """Class constructor.
+
+        Args:
+            data (SensorData): Sensor data class used to construct this object.
+        """
         self.__data = data
 
         if not data.frame is None:
@@ -90,40 +116,63 @@ class Sensor:
 
     @property
     def id(self) -> str:
+        """Unique sensor id."""
         return self.data.id
 
     @property
     def data(self) -> SensorData:
+        """The SensorData backing this model."""
         return self.__data
 
     @property
     def bodyToSensorTxProv(self) -> TransformProvider:
+        """Provider for the transformation from satellite body frame to sensor frame."""
         return self.__bodyToSensor
 
     @cached_property
     def sensorToBodyTxProv(self) -> TransformProvider:
+        """Provider for the transformation from sensor frame to satellite body frame."""
         return TransformProviderUtils.getReversedProvider(self.bodyToSensorTxProv)
 
     @u.quantity_input
-    def createFov(self, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad) -> FieldOfView:
-        return self._createFovInFrame(
-            StaticTransform.getIdentity(), angularMargin=angularMargin
-        )
-
     def createFovInBodyFrame(
         self, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad
     ) -> FieldOfView:
-        tx = self.sensorToBodyTxProv.getStaticTransform(AbsoluteDate.ARBITRARY_EPOCH)
-        return self._createFovInFrame(tx, angularMargin=angularMargin)
+        """Create the FieldOfView in the satellite's body frame.
 
-    def _createFovInFrame(
+        Args:
+            angularMargin (Quantity[u.rad], optional): Angular margin of the computation. Defaults to 1.0e-6*u.rad.
+
+        Returns:
+            FieldOfView: The sensor field of view.
+        """
+        tx = self.sensorToBodyTxProv.getStaticTransform(AbsoluteDate.ARBITRARY_EPOCH)
+        return self.createFovInFrame(tx, angularMargin=angularMargin)
+
+    @u.quantity_input
+    def createFovInFrame(
         self, tx: StaticTransform, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad
-    ):
+    ) -> FieldOfView:
+        """Create the FieldOfView using the provided transform.
+
+        This class is intended to be impletented by sub-classes. No default implementation is provided.
+
+        Args:
+            tx (StaticTransform): The transform from the sensor to the destination frame.
+            angularMargin (Quantity[u.rad], optional): The angular margin. Defaults to 1.0e-6*u.rad.
+        """
         raise NotImplementedError()
 
 
 class CameraSensor(Sensor):
+    """Sensor model specification for camera sensors."""
+
     def __init__(self, data: CameraSensorData):
+        """Class constructor.
+
+        Args:
+            data (CameraSensorData): The sensor data used to construct this object.
+        """
         super().__init__(data)
         self.__hfov = (
             data.rows * Quantity(data.pitch).si / Quantity(data.focalLength).si * u.rad
@@ -133,16 +182,29 @@ class CameraSensor(Sensor):
         )
 
     @property
-    def hFov(self):
+    def hFov(self) -> Quantity[u.rad]:
+        """The horizontal field of view angle."""
         return self.__hfov
 
     @property
-    def vFov(self):
+    def vFov(self) -> Quantity[u.rad]:
+        """The vertical field of view angle."""
         return self.__vfov
 
-    def _createFovInFrame(
+    def createFovInFrame(
         self, tx: StaticTransform, angularMargin: Quantity[u.rad] = 1.0e-6 * u.rad
-    ):
+    ) -> FieldOfView:
+        """Create the FieldOfView using the provided transform.
+
+        This class is intended to be impletented by sub-classes. No default implementation is provided.
+
+        Args:
+            tx (StaticTransform): The transform from the sensor to the destination frame.
+            angularMargin (Quantity[u.rad], optional): The angular margin. Defaults to 1.0e-6*u.rad.
+
+        Returns:
+            FieldOfView: The sensor FieldOvView
+        """
         center = tx.transformVector(Vector3D.PLUS_K)
         if self.data.rowsAlongX:
             axis1 = tx.transformVector(Vector3D.PLUS_I)
@@ -323,6 +385,7 @@ class Satellite:
             )
             self._initAttitudes(orbit.getFrame(), context, earth)
             atProv = self.getAttitudeProvider("mission")
+            
             self.__propagator = orekitfactory.factory.to_propagator(
                 orbit,
                 mass=self.mass,
@@ -395,7 +458,8 @@ class Satellite:
         else:
             rot = Rotation.IDENTITY
 
-        angles = rot.getAngles(RotationOrder.XYZ, RotationConvention.VECTOR_OPERATOR)
+        # rotation from body -> lof; we need angles from lof -> body
+        angles = rot.revert().getAngles(RotationOrder.XYZ, RotationConvention.FRAME_TRANSFORM)
         return LofOffset(
             frame, lofType, RotationOrder.XYZ, angles[0], angles[1], angles[2]
         )

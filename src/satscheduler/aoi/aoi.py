@@ -1,24 +1,19 @@
 """
 Container to load and manage AOIs within the 
 """
-from typing import Iterable
 from astropy import units
-from numpy import isin
 from pyproj import CRS
 from orekitfactory.utils import Dataloader
 from orekitfactory.utils import validate_quantity
-
+import math
 import shapely
 import shapely.geometry
 import shapely.validation
-from shapely.ops import clip_by_rect, polygonize
 from shapely.geometry.polygon import Polygon
-from shapely.geometry.multipolygon import MultiPolygon
-from shapely.geometry.multilinestring import MultiLineString
 import geopandas
-from geopandas import GeoDataFrame, GeoSeries
+from geopandas import GeoDataFrame
+import numpy as np
 
-from collections.abc import Generator
 from org.hipparchus.geometry.spherical.twod import SphericalPolygonsSet
 from org.hipparchus.util import FastMath
 from org.orekit.models.earth.tessellation import EllipsoidTessellator
@@ -50,7 +45,7 @@ class Aoi:
         country: str = None,
         alpha2: str = None,
         alpha3: str = None,
-        area: float = 0
+        area: float = 0,
     ):
         """Class construtor
 
@@ -141,11 +136,11 @@ class Aoi:
             CRS|Any: The crs of the aoi's polygon, if specified
         """
         return self.__crs
-    
+
     @property
     def area(self) -> float:
         """The area of this aoi, in square meters.
-        
+
         Returns:
             float: The area of this aoi, in square meters.
         """
@@ -185,14 +180,13 @@ class Aoi:
             logging.getLogger(__name__).error(
                 "Error building aoi zone for aoi id=%s.",
                 self.id,
-                exc_info=1,
-                stack_info=1,
+                exc_info=1
             )
             return None
 
 
 def loadIntoGdf(
-    sourceUrl: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",  #'https://datahub.io/core/geo-countries/r/countries.geojson',
+    url: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",  #'https://datahub.io/core/geo-countries/r/countries.geojson',
     bbox: Polygon = None,
 ) -> geopandas.GeoDataFrame:
     """Load the source file into a GeoDataFrame.
@@ -205,15 +199,17 @@ def loadIntoGdf(
         geopandas.GeoDataFrame: The data frame
     """
     # download the source file
-    filepath = Dataloader.download(url=sourceUrl)
+    filepath = Dataloader.download(url=url)
 
     # read the fille
     gdf = geopandas.read_file(filepath, bbox=bbox)
 
     # project to equal-area
-    equal_area = gdf.to_crs("EPSG:3857")
+    equal_area = gdf.to_crs(
+        "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs"
+    )
     center = equal_area.geometry.centroid
-    center = center.to_crs("+proj=longlat +datum=WGS84 +no_defs")
+    center = center.to_crs("EPSG:4326")
 
     gdf["center"] = center
 
@@ -230,24 +226,22 @@ def _toZone(polygon: Polygon) -> SphericalPolygonsSet:
         SphericalPolygonsSet: The resulting spherical polygons set
     """
     points = []
-    prev = None
+    prev = polygon.boundary.coords[-1]
     for p in polygon.boundary.coords:
-        if prev:
-            d_lat = abs(p[1] - prev[1])
-            d_lon = abs(p[0] - prev[1])
-            if (d_lat < 0.000001 or d_lat > 89.999999) and (
-                d_lon < 0.000001 or d_lon > 359.999999
-            ):
-                continue
+        d_lat = abs(p[1] - prev[1])
+        d_lon = abs(p[0] - prev[0])
+        if (d_lat < 0.000000001 or d_lat > 89.999999) and (
+            d_lon < 0.000000001 or d_lon > 359.99999
+        ):
+            continue
 
-        if p[1] > -90 and p[1] < 90:
-            points.append(
-                GeodeticPoint(FastMath.toRadians(p[1]), FastMath.toRadians(p[0]), 0.0)
-            )  # put lon,lat into lat,lon order
+        points.append(
+            GeodeticPoint(FastMath.toRadians(p[1]), FastMath.toRadians(p[0]), 0.0)
+        )  # put lon,lat into lat,lon order
 
         prev = p
 
-    return EllipsoidTessellator.buildSimpleZone(float(1.0e-6), points)
+    return EllipsoidTessellator.buildSimpleZone(float(1.0e-10), points)
 
 
 def _buildAoi(
@@ -258,7 +252,7 @@ def _buildAoi(
     continent: str = None,
     country: str = None,
     crs: CRS = None,
-    area: float = 0
+    area: float = 0,
 ) -> Aoi:
     """Build an AOI from the provided geometry
 
@@ -286,15 +280,16 @@ def _buildAoi(
         country=country,
         continent=continent,
         crs=crs,
-        area=area
+        area=area,
     )
 
 
 def loadAois(
-    sourceUrl: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",
+    url: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",
     bbox: tuple[float, float, float, float] = None,
     buffer: units.Quantity[units.m] | float | str = 20000 * units.m,
     tolerance: units.Quantity[units.m] | float | str = 1000 * units.m,
+    filter: dict = None,
     **kwargs
 ) -> list[Aoi]:
     """Load the AOIs from the source as a list of Aoi objects.
@@ -307,13 +302,13 @@ def loadAois(
         bbox (tuple[float, float, float, float], optional): Bounding box limiting the regions to read. A 4-tuple of [min_lon, min_lat, max_lon, max_lat]. Defaults to None.
         buffer (units.Quantity[units.m], optional): Amount to buffer each aoi. Defaults to 20km.
         tolerance (units.Quantity[units.m], optional): Minimum spacing of points, used to reduce the fidelidy of polygons. Defaults to 1km.
-
+        filter (dict, optional): Dictionary of filters to apply.
     Returns:
         list[Aoi]: The list of loaded Aoi objects.
     """
 
     logger = logging.getLogger(__name__)
-    logger.debug("loading aois from %s", sourceUrl)
+    logger.debug("loading aois from %s", url)
 
     buffer = validate_quantity(buffer, units.m)
     tolerance = validate_quantity(tolerance, units.m)
@@ -329,35 +324,46 @@ def loadAois(
         )
 
     # read the fille
-    gdf = loadIntoGdf(sourceUrl=sourceUrl, bbox=box)
+    gdf = loadIntoGdf(url=url, bbox=box)
     crs = gdf.crs
 
     if crs is None:
-        crs = CRS.from_string("+proj=longlat +datum=WGS84 +no_defs")
+        crs = CRS.from_string("EPSG:4326")
         gdf.set_crs(crs)
+
+    if filter:
+        for k, v in filter.items():
+            if v.startswith("not "):
+                gdf = gdf.loc[gdf[k] != v[4:]]
+            else:
+                gdf = gdf.loc[gdf[k] == v]
 
     # buffer
     if buffer > 0 * units.m:
-        gdf.to_crs("EPSG:3857", inplace=True)
+        gdf.to_crs(
+            "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs",
+            inplace=True,
+        )
         gds = gdf.buffer(buffer.to_value(units.m))
         gdf.geometry = gds
         gdf.to_crs(crs, inplace=True)
-        
+
         # explode the multi-geometries
         gdf = gdf.explode(ignore_index=True)
 
-        lonspan = gdf.bounds["maxx"] - gdf.bounds["minx"]
-        mask = lonspan > 150
-
+        # antartica has an inf lonspan, just filter it. we're not adjusting the antimeridian
+        lonspan = (gdf.bounds["maxx"] - gdf.bounds["minx"]).replace(np.inf, 0.)
+        mask = lonspan > 180
+                
         gdf.loc[mask, "geometry"] = gdf.loc[mask, "geometry"].apply(antimeridian.split)
+        
     gdf = gdf.explode(ignore_index=True)
-    
+
     # compute the area
-    gdf.to_crs("EPSG:3857", inplace=True)
-    area = gdf.geometry.area
-    gdf["area"] = area
-    gdf.to_crs(crs, inplace=True)
-    
+    area_df = gdf.to_crs("EPSG:6933")
+    area = area_df.geometry.area
+    gdf["area"] = area.replace(np.nan, 14.2e14) #antarctica's area is nan, set to 14.6e6 km^2
+
     aois = []
     for index, row in gdf.iterrows():
         continent = row["CONTINENT"]
@@ -376,7 +382,7 @@ def loadAois(
                 alpha3=alpha3,
                 continent=continent,
                 crs=crs,
-                area=a
+                area=a,
             )
         )
 

@@ -34,7 +34,7 @@ class FixedTransformProvider(PythonTransformProvider):
         else:
             # both translation and rotation are specified
             if not self.__r is None:
-                tx = Transform(date, self.__tx)
+                tx = Transform(date, self.__tx)  # TODO: Do i need to negate this??
                 r = Transform(date, self.__r)
                 return Transform(date, tx, r)
             # only translation

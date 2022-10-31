@@ -6,10 +6,13 @@ import czml3.types
 import folium
 import math
 import logging
+import pandas as pd
+import os
+import os.path
 
 from org.hipparchus.geometry.spherical.twod import Vertex
 
-from ..aoi import Aoi, loadAois
+from .aoi import Aoi, loadAois
 from ..configuration import get_config
 from ..utils.czml import Polygon as OutlinedPolygon
 
@@ -54,6 +57,26 @@ def config_args(parser):
         help="Path where to write a czml output holding AOIs. If no file path specified, then `aois.czml` will be used.",
     )
 
+    parser.add_argument(
+        "--csv",
+        dest="csv",
+        nargs="?",
+        default=None,
+        const="aois.csv",
+        metavar="FILENAME",
+        help="Path where to write a csv output holding AOIs. If no file path specified, then `aois.csv` will be used.",
+    )
+    
+    parser.add_argument(
+        "--border",
+        dest="border",
+        nargs="?",
+        default=None,
+        const="aoi_borders",
+        metavar="AOI_DIRECTORY",
+        help="Path to a directory in which aoi borders will be stored. In no path specified, then 'aoi_borders' will be used."
+    )
+
 
 def execute(args=None):
     """Load the AOIs, generating a summary + map plot.
@@ -76,7 +99,6 @@ def execute(args=None):
     if args.html:
         map = folium.Map()
 
-        zones = []
         for aoi in aois:
             folium.GeoJson(
                 data=aoi.to_gdf().to_json(),
@@ -125,6 +147,33 @@ def execute(args=None):
             fname2,
         )
 
+    if args.csv:
+        aoi_df = pd.DataFrame(
+            columns=["aoi_id", "country", "continent", "area", "alpha2", "alpha3"]
+        )
+        idx = 0
+        for aoi in aois:
+            aoi_df.loc[idx] = [
+                aoi.id,
+                aoi.country,
+                aoi.continent,
+                aoi.area,
+                aoi.alpha2,
+                aoi.alpha3,
+            ]
+            idx += 1
+
+        aoi_df.to_csv(args.csv)
+        
+        logger.info("AOI summary written to %s", args.csv)
+
+    if args.border:
+        if not os.path.exists(args.border):
+            os.makedirs(args.border, exist_ok=True)
+        for aoi in aois:
+            write_aoi_border(aoi, prefix=args.border)
+        
+        logger.info("aoi borders written to %s", args.border)
     return 0
 
 
@@ -140,15 +189,14 @@ def aoi_to_czml(aoi: Aoi, zones: bool = False, config: dict = {}) -> czml3.Packe
         czml3.Packet: _description_
     """
     label = czml3.properties.Label(
-        horizontalOrigin=czml3.enums.HorizontalOrigins.LEFT,
+        horizontalOrigin=czml3.enums.HorizontalOrigins.CENTER,
         show=config.get("labels", True),
         font=config.get("font", "11pt Lucida Console"),
         style=czml3.enums.LabelStyles.FILL_AND_OUTLINE,
         outlineWidth=2,
         text=f"{aoi.country} ({aoi.id})",
-        verticalOrigin=czml3.enums.VerticalOrigins.CENTER,
+        verticalOrigin=czml3.enums.VerticalOrigins.BASELINE,
         fillColor=czml3.properties.Color.from_str(config.get("color", "#FF0000")),
-        outlineColor=czml3.properties.Color.from_str(config.get("color", "#000000")),
     )
 
     if zones:
@@ -164,20 +212,32 @@ def aoi_to_czml(aoi: Aoi, zones: bool = False, config: dict = {}) -> czml3.Packe
 
         coords = []
         for p in s2_points:
-
             lat = 0.5 * math.pi - p.getPhi()
             lon = p.getTheta()
 
-            coords.extend([lon, lat, 10])
+            coords.extend([lon, lat, 100])
 
         positions = czml3.properties.PositionList(cartographicRadians=coords)
 
     else:
         coords = []
         for c in aoi.polygon.boundary.coords:
-            coords.extend(c)
-            coords.append(10)  # 0m elevation
+            if math.isfinite(c[0]) and math.isfinite(c[1]):
+                coords.extend(c)
+                coords.append(100)  # 0m elevation
+
         positions = czml3.properties.PositionList(cartographicDegrees=coords)
+
+    if aoi.polygon.centroid.bounds:
+        position = czml3.properties.Position(
+            cartographicDegrees=[
+                aoi.polygon.centroid.coords[0][0],
+                aoi.polygon.centroid.coords[0][1],
+                1000,
+            ]
+        )
+    else:
+        position = None
 
     return czml3.Packet(
         id=f"aoi/{aoi.id}",
@@ -187,19 +247,34 @@ def aoi_to_czml(aoi: Aoi, zones: bool = False, config: dict = {}) -> czml3.Packe
             positions=positions,
             material=czml3.properties.Material(
                 polylineOutline=czml3.properties.PolylineOutlineMaterial(
-                    color=label.fillColor,
-                    outlineColor=label.fillColor,
-                    outlineWidth=3
+                    color=label.fillColor, outlineColor=label.fillColor, outlineWidth=3
                 ),
             ),
             arcType=czml3.enums.ArcTypes.GEODESIC,
-            zIndex=10
+            clampToGround=True,
+            zIndex=10,
         ),
-        position=czml3.properties.Position(
-            cartographicDegrees=[
-                aoi.polygon.centroid.coords[0][0],
-                aoi.polygon.centroid.coords[0][1],
-                0,
-            ]
-        ),
+        position=position,
     )
+
+def write_aoi_border(aoi:Aoi, prefix: str=None):
+    fname = os.path.join(f"{prefix if prefix else ''}", f"{aoi.id}_{aoi.country or ''}.csv")
+    with open(fname, "w") as f:
+        for c in aoi.polygon.boundary.coords:
+            f.write(f"{c[0]}, {c[1]}{os.linesep}")
+    
+    zone = aoi.createZone()
+    initialVert: Vertex = zone.getBoundaryLoops().get(0)
+    print(f"loop size: {zone.getBoundaryLoops().size()}")
+    nextVert: Vertex = initialVert.getOutgoing().getEnd()
+    s2_points = [initialVert.getLocation()]
+
+    while initialVert.getLocation().distance(nextVert.getLocation()) > 1e-10:
+        s2_points.append(nextVert.getLocation())
+        nextVert = nextVert.getOutgoing().getEnd()
+    with open(f"{fname[:-4]}_zone.csv", "w") as f:
+        for p in s2_points:
+            lat = math.degrees(0.5 * math.pi - p.getPhi())
+            lon = math.degrees(p.getTheta())
+
+            f.write(f"{lon},{lat}{os.linesep}")

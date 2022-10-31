@@ -64,15 +64,19 @@ class EphemerisGenerator:
             self.__states.add(self.__propagator.propagate(t))
             t = t.shiftedBy(adjusted_step)
 
-    def build(self, atProv:AttitudeProvider=None) -> Ephemeris:
+    def build(self, atProv: AttitudeProvider = None) -> Ephemeris:
         for i in range(self.__states.size() - 1, 0, -1):
             j = i - 1
-            if SpacecraftState.cast_(self.__states.get(i)).getDate().equals(SpacecraftState.cast_(self.__states.get(j)).getDate()):
+            if (
+                SpacecraftState.cast_(self.__states.get(i))
+                .getDate()
+                .equals(SpacecraftState.cast_(self.__states.get(j)).getDate())
+            ):
                 self.__states.remove(i)
-        
+
         if not atProv:
             atProv = InertialProvider.of(self.__propagator.getFrame())
-        
+
         result = Ephemeris(
             self.__states,
             int(2),
