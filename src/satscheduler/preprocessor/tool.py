@@ -15,19 +15,16 @@ from typing import Iterator
 from orekit.pyhelpers import absolutedate_to_datetime, datetime_to_absolutedate
 from orekitfactory.time import DateInterval, DateIntervalList
 
-from java.util import List
 from org.orekit.bodies import GeodeticPoint
 from org.orekit.time import AbsoluteDate
 from org.orekit.frames import Transform
+from java.util import List
 
-from .preprocessor import (
-    PreprocessedAoi,
-    PreprocessingResult,
-)
-from .runner import execute as preprocessor_execute
+from .core import PreprocessingResult, PreprocessedAoi
+from .runner import create_uows, run_units_of_work
+
 from ..aoi.tool import aoi_to_czml
-from ..configuration import get_config
-from ..utils.czml import Polygon as OutlinedPolygon
+from ..configuration import get_config, Configuration, AoiConfiguration
 
 # patch cml3
 czml3.types.TYPE_MAPPING[int] = "number"
@@ -56,7 +53,7 @@ def config_args(parser):
         action=argparse.BooleanOptionalAction,
         default=False,
     )
-    
+
     parser.add_argument(
         "--console",
         help="Print output to the console.",
@@ -91,14 +88,17 @@ def config_args(parser):
     )
 
 
-def populate_dataframes(results: list[PreprocessingResult]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def populate_dataframes(
+    results: list[PreprocessingResult],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Populate the result dataframes.
 
     Args:
         results (list[PreprocessingResult]): The list of results from the preprocessors.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: The dataframes. The first data frame lists the AOIs processed, the second provides the access times.
+        tuple[pd.DataFrame, pd.DataFrame]: The dataframes. The first data frame lists the AOIs processed, the
+        second provides the access times.
     """
     logging.getLogger(__name__).debug("Populating dataframes.")
     paoi_df = pd.DataFrame(
@@ -112,9 +112,7 @@ def populate_dataframes(results: list[PreprocessingResult]) -> tuple[pd.DataFram
         ]
     )
 
-    aoi_df = pd.DataFrame(
-        columns=["aoi_id", "satellite", "sensor", "area", "continent", "country"]
-    )
+    aoi_df = pd.DataFrame(columns=["aoi_id", "satellite", "sensor", "area", "continent", "country"])
 
     aidx = 0
     pidx = 0
@@ -165,19 +163,17 @@ def execute(args=None) -> int:
 
     Args:
         args (argparse.Namespace, optional): The command line arguments. Defaults to None.
-    
+
     Returns:
         int: The return code to provide back to the OS.
     """
     logger = logging.getLogger(__name__)
     config = get_config()
-    vm = orekitfactory.initializer.get_orekit_vm()
 
     # Execute preprocessing
     logger.info("Starting preprocessor tool.")
-    results: list[PreprocessingResult] = preprocessor_execute(
-        args=args, config=config, vm=vm
-    )
+    uows = create_uows(args, config=config)
+    results: list[PreprocessingResult] = run_units_of_work(uows=uows, args=args, config=config)
     logger.info("Preprocessing complete.")
 
     # Populate dataframes
@@ -193,14 +189,11 @@ def execute(args=None) -> int:
 
     total_sum = paoi_df[["aoi_id", "duration"]].groupby(["aoi_id"]).sum()
     total_sum.rename(columns={"duration": "total access duration"}, inplace=True)
-    
+
     if args.console:
-        print(proc_aoi)
         print(total_sum)
 
-    logger.info(
-        "After processing, %d/%d aois have no access.", total_aoi - proc_aoi, total_aoi
-    )
+    logger.info("After processing, %d/%d aois have no access.", total_aoi - proc_aoi, total_aoi)
 
     # Write the aoi czml
     if args.aoi_czml:
@@ -209,10 +202,7 @@ def execute(args=None) -> int:
                 czml3.Preamble(
                     name="Aois",
                 ),
-                *[
-                    aoi_to_czml(aoi.aoi, config=config["aois"])
-                    for aoi in iterate_results(results)
-                ],
+                *[aoi_to_czml(aoi.aoi, config=config.aois) for aoi in iterate_results(results)],
             ]
         )
 
@@ -228,14 +218,10 @@ def execute(args=None) -> int:
         sat_packet, sat_start, sat_stop = generate_satellite_czml(r, config)
 
         total_interval = DateIntervalList(
-            interval=DateInterval(
-                datetime_to_absolutedate(sat_start), datetime_to_absolutedate(sat_stop)
-            )
+            interval=DateInterval(datetime_to_absolutedate(sat_start), datetime_to_absolutedate(sat_stop))
         )
 
-        sensor_packets = generate_sensor_czml(
-            r, total_interval.span.start, total_interval.span.stop, config
-        )
+        sensor_packets = generate_sensor_czml(r, total_interval.span.start, total_interval.span.stop, config)
 
         sat_doc = czml3.Document(
             [
@@ -244,45 +230,50 @@ def execute(args=None) -> int:
                     clock=czml3.types.IntervalValue(
                         start=sat_start,
                         end=sat_stop,
-                        value=czml3.properties.Clock(
-                            currentTime=sat_start, multiplier=10
-                        ),
+                        value=czml3.properties.Clock(currentTime=sat_start, multiplier=10),
                     ),
                 ),
                 sat_packet,
-                *[
-                    generate_paoi_czml(aoi, total_interval, config.get("aois", {}))
-                    for aoi in r.aois
-                ],
+                *[generate_paoi_czml(aoi, total_interval, config.aois) for aoi in r.aois],
                 *sensor_packets,
             ]
         )
 
         with open(f"{args.prefix}_sat_{r.sat.id}.czml", "w") as f:
             sat_doc.dump(f)
-    
+
     return 0
 
 
 def generate_sensor_czml(
-    result: PreprocessingResult, start: AbsoluteDate, stop: AbsoluteDate, config: dict
+    result: PreprocessingResult, start: AbsoluteDate, stop: AbsoluteDate, config: Configuration
 ) -> tuple[czml3.Packet]:
+    """Generate a set to CZML packets for the provided sensor.
+
+    Args:
+        result (PreprocessingResult): The preprocessing result holding ephemeris and sensor data.
+        start (AbsoluteDate): The start time.
+        stop (AbsoluteDate): The stop time.
+        config (dict): The configuration dictionary.
+
+    Returns:
+        tuple[czml3.Packet]: The czml packets.
+    """
     sat = result.sat
     fov = sat.sensor("camera").createFovInBodyFrame()
 
-    default_config = config
-    orbit_config = config["satellites"][result.sat.id]
-    defaults = lambda x, v: orbit_config.get(x, default_config.get(x, v))
+    orbit_config = config.satellites[result.sat.id]
 
-    interval = (
-        result.interval
-    )  # DateInterval(start=result.ephemeris.getMinDate(), stop=result.ephemeris.getMaxDate())
+    def defaults(x: str, v):
+        value = orbit_config.maybe_get(x)
+        if value is None:
+            return v
+        return value
 
-    frame = orekitfactory.factory.get_frame(
-        "itrf", iersConventions="2010", simpleEop=False
-    )
+    interval = result.interval
+
     earth = orekitfactory.factory.get_reference_ellipsoid(
-        model="wgs84", frameName="itrf", simpleEop=False
+        model="wgs84", frameName="itrf", iersConventions="2010", simpleEop=False
     )
 
     p0_coords = []
@@ -294,12 +285,8 @@ def generate_sensor_czml(
     step_secs: float = 300.0
     while t.isBeforeOrEqualTo(interval.stop):
         state = result.ephemeris.propagate(t)
-        inertialToBody_tx = state.getFrame().getTransformTo(
-            earth.getBodyFrame(), state.getDate()
-        )
-        fovToBody_tx = Transform(
-            state.getDate(), state.toTransform().getInverse(), inertialToBody_tx
-        )
+        inertialToBody_tx = state.getFrame().getTransformTo(earth.getBodyFrame(), state.getDate())
+        fovToBody_tx = Transform(state.getDate(), state.toTransform().getInverse(), inertialToBody_tx)
 
         footprint = fov.getFootprint(fovToBody_tx, earth, math.radians(10))
         locs = List.cast_(footprint.get(0))
@@ -317,9 +304,7 @@ def generate_sensor_czml(
 
         t = t.shiftedBy(step_secs)
 
-    interval_czml = czml3.types.TimeInterval(
-        start=interval.start_dt, end=interval.stop_dt
-    )
+    interval_czml = czml3.types.TimeInterval(start=interval.start_dt, end=interval.stop_dt)
     return [
         czml3.Packet(
             id=f"footprint/{sat.id}/camera-0",
@@ -369,25 +354,15 @@ def generate_sensor_czml(
                 show=True,
                 positions=czml3.properties.PositionList(
                     references=[
-                        czml3.types.ReferenceValue(
-                            string=f"footprint/{sat.id}/camera-0#position"
-                        ),
-                        czml3.types.ReferenceValue(
-                            string=f"footprint/{sat.id}/camera-1#position"
-                        ),
-                        czml3.types.ReferenceValue(
-                            string=f"footprint/{sat.id}/camera-2#position"
-                        ),
-                        czml3.types.ReferenceValue(
-                            string=f"footprint/{sat.id}/camera-3#position"
-                        ),
+                        czml3.types.ReferenceValue(string=f"footprint/{sat.id}/camera-0#position"),
+                        czml3.types.ReferenceValue(string=f"footprint/{sat.id}/camera-1#position"),
+                        czml3.types.ReferenceValue(string=f"footprint/{sat.id}/camera-2#position"),
+                        czml3.types.ReferenceValue(string=f"footprint/{sat.id}/camera-3#position"),
                     ]
                 ),
                 material=czml3.properties.Material(
                     solidColor=czml3.properties.SolidColorMaterial(
-                        color=czml3.properties.Color.from_str(
-                            config.get("color", "#0000FF")
-                        )
+                        color=czml3.properties.Color.from_str(defaults("color", "#0000FF"))
                     ),
                 ),
                 arcType=czml3.enums.ArcTypes.GEODESIC,
@@ -398,38 +373,35 @@ def generate_sensor_czml(
 
 
 def generate_satellite_czml(
-    result: PreprocessingResult, config: dict
+    result: PreprocessingResult, config: Configuration
 ) -> tuple[czml3.Packet, dt.datetime, dt.datetime]:
-    """Generate a czml packet for the satellite in the results
+    """Generate a czml packet for the satellite in the results.
 
     Args:
-        result (PreprocessingResult): The preprocessing result
+        result (PreprocessingResult): The preprocessing result.
+        config (Configuration): The configuration.
 
     Returns:
         tuple[czml3.Packet, dt.datetime, dt.datetime]: A 3-tuple of the czml packet, the start time, and the stop time
     """
-    default_config = config
-    orbit_config = config["satellites"][result.sat.id]
-    defaults = lambda x, v: orbit_config.get(x, default_config.get(x, v))
+    orbit_config = config.satellites[result.sat.id]
+    interval = result.interval
+    frame = orekitfactory.factory.get_frame("itrf", iersConventions="2010", simpleEop=False)
 
-    interval = (
-        result.interval
-    )  # DateInterval(start=result.ephemeris.getMinDate(), stop=result.ephemeris.getMaxDate())
+    def defaults(*args):
+        default_value = args[-1]
+        for k in args[0:-1]:
+            v = orbit_config.maybe_get(k)
+            if v is not None:
+                return v
+        return default_value
 
-    frame = orekitfactory.factory.get_frame(
-        "itrf", iersConventions="2010", simpleEop=False
-    )
     # function to generate the cartesian position array
     def generate_carts():
         t: AbsoluteDate = interval.start
         step_secs: float = 300.0
         while t.isBeforeOrEqualTo(interval.stop):
-            try:
-                pv = result.ephemeris.getPVCoordinates(t, frame)
-            except:
-                print(f"Error at a time: {t}")
-                raise
-
+            pv = result.ephemeris.getPVCoordinates(t, frame)
             yield t.durationFrom(interval.start)
             yield pv.getPosition().getX()
             yield pv.getPosition().getY()
@@ -445,8 +417,8 @@ def generate_satellite_czml(
         style=czml3.enums.LabelStyles.FILL_AND_OUTLINE,
         text=result.sat.name,
         verticalOrigin=czml3.enums.VerticalOrigins.CENTER,
-        fillColor=czml3.properties.Color.from_str(defaults("color", "#00FF00")),
-        outlineColor=czml3.properties.Color.from_str(defaults("color", "#000000")),
+        fillColor=czml3.properties.Color.from_str(defaults("fillColor", "color", "#00FF00")),
+        outlineColor=czml3.properties.Color.from_str(defaults("outlineColor", "color", "#000000")),
     )
 
     bb = czml3.properties.Billboard(
@@ -469,23 +441,15 @@ def generate_satellite_czml(
 
     for a in result.aois:
         for ivl in a.intervals:
-            width_intervals.append(
-                czml3.types.IntervalValue(start=ivl.start_dt, end=ivl.stop_dt, value=5)
-            )
+            width_intervals.append(czml3.types.IntervalValue(start=ivl.start_dt, end=ivl.stop_dt, value=5))
 
     path = czml3.properties.Path(
         show=czml3.types.Sequence(
-            [
-                czml3.types.IntervalValue(
-                    start=interval.start_dt, end=interval.stop_dt, value=True
-                )
-            ]
+            [czml3.types.IntervalValue(start=interval.start_dt, end=interval.stop_dt, value=True)]
         ),
         width=czml3.types.Sequence(width_intervals),
         resolution=120,
-        material=czml3.properties.Material(
-            solidColor=czml3.properties.SolidColorMaterial(color=label.fillColor)
-        ),
+        material=czml3.properties.Material(solidColor=czml3.properties.SolidColorMaterial(color=label.fillColor)),
     )
 
     pos = czml3.properties.Position(
@@ -500,9 +464,7 @@ def generate_satellite_czml(
         czml3.Packet(
             id=result.sat.id,
             name=result.sat.name,
-            availability=czml3.types.TimeInterval(
-                start=interval.start_dt, end=interval.stop_dt
-            ),
+            availability=czml3.types.TimeInterval(start=interval.start_dt, end=interval.stop_dt),
             billboard=bb,
             label=label,
             path=path,
@@ -514,19 +476,35 @@ def generate_satellite_czml(
 
 
 def generate_paoi_czml(
-    aoi: PreprocessedAoi, total_interval: DateIntervalList, config: dict
+    aoi: PreprocessedAoi, total_interval: DateIntervalList, config: AoiConfiguration
 ) -> czml3.Packet:
+    """Generate pre-processed AOI czml packet.
+
+    Args:
+        aoi (PreprocessedAoi): The aoi data.
+        total_interval (DateIntervalList): The access interval list.
+        config (AoiConfiguration): The aoi configuration.
+
+    Returns:
+        czml3.Packet: The resulting CZML packet.
+    """
+
+    def config_value(key, default_value):
+        v = config.maybe_get(key)
+        if v is None:
+            return default_value
+        return v
 
     label = czml3.properties.Label(
         horizontalOrigin=czml3.enums.HorizontalOrigins.LEFT,
-        show=config.get("labels", True),
-        font=config.get("font", "11pt Lucida Console"),
+        show=config_value("labels", True),
+        font=config_value("font", "11pt Lucida Console"),
         style=czml3.enums.LabelStyles.FILL,
         outlineWidth=2,
         text=f"{aoi.aoi.country} ({aoi.aoi.id})",
         verticalOrigin=czml3.enums.VerticalOrigins.CENTER,
-        fillColor=czml3.properties.Color.from_str(config.get("color", "#FF0000")),
-        outlineColor=czml3.properties.Color.from_str(config.get("color", "#000000")),
+        fillColor=czml3.properties.Color.from_str(config_value("color", "#FF0000")),
+        outlineColor=czml3.properties.Color.from_str(config_value("color", "#000000")),
     )
 
     coords = []
@@ -588,9 +566,7 @@ def generate_paoi_czml(
         label=label,
         polygon=czml3.properties.Polygon(
             positions=positions,
-            material=czml3.properties.Material(
-                solidColor=czml3.properties.SolidColorMaterial(color=label.fillColor)
-            ),
+            material=czml3.properties.Material(solidColor=czml3.properties.SolidColorMaterial(color=label.fillColor)),
             arcType=czml3.enums.ArcTypes.GEODESIC,
             show=czml3.types.Sequence(show_intervals),
             zIndex=10,
@@ -598,9 +574,7 @@ def generate_paoi_czml(
         polyline=czml3.properties.Polyline(
             positions=positions,
             material=czml3.properties.Material(
-                polylineOutline=czml3.properties.PolylineOutlineMaterial(
-                    color=label.fillColor
-                ),
+                polylineOutline=czml3.properties.PolylineOutlineMaterial(color=label.fillColor),
             ),
             arcType=czml3.enums.ArcTypes.GEODESIC,
             show=True,

@@ -1,1 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="0.702" timestamp="2022-08-10T21:53:05.139744" hostname="JoesLappy"><testcase classname="src.tests.test_utils" name="test_duration_props" time="0.484" /></testsuite></testsuites>

@@ -1,4 +1,4 @@
-"""Initialization functions."""
+"""Initialization functions for py-rebar applications."""
 import os.path
 from orekitfactory.utils import Dataloader
 

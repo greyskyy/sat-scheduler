@@ -1,57 +1,33 @@
 """Scheduling preprocessor. Load AOI and satellite ephemeris, then compute inviews."""
 import logging
-import isodate
-import math
-import numpy as np
-import astropy.units as u
+import datetime as dt
 import orekit
 import orekitfactory.factory
+import orekitfactory.time
 
-
-from dataclasses import dataclass
-from datetime import timedelta
-from functools import cached_property
-from typing import Iterable
-
-from orekitfactory.time import DateIntervalList, DateIntervalListBuilder, DateInterval
-
-from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
 from org.hipparchus.ode.events import Action
-from org.hipparchus.util import FastMath
-from org.orekit.data import DataContext
-from org.orekit.models.earth import ReferenceEllipsoid
-from org.orekit.propagation import BoundedPropagator, Propagator
+from org.orekit.geometry.fov import FieldOfView
 from org.orekit.propagation.events import (
+    EventDetector,
     FootprintOverlapDetector,
     GeographicZoneDetector,
 )
 from org.orekit.propagation.events.handlers import PythonEventHandler
-from org.orekit.time import AbsoluteDate
-from org.orekit.geometry.fov import DoubleDihedraFieldOfView
 
 from ..aoi import Aoi
-from ..satellite import CameraSensor, Satellite, ScheduleableSensor
+from ..models import CameraSensorModel, SatelliteModel, SensorModel
 from ..utils import EphemerisGenerator
 
+from .core import PreprocessedAoi, PreprocessingResult, UnitOfWork
 
-@dataclass(frozen=True)
-class PreprocessedAoi:
-    """Preprocessing result for a single AOI."""
-
-    aoi: Aoi
-    sat: Satellite
-    sensor: CameraSensor
-    intervals: DateIntervalList
+__logger = None
 
 
-@dataclass(frozen=True)
-class PreprocessingResult:
-    """Result of preprocessing a single satellite/sensor pair."""
-
-    sat: Satellite
-    ephemeris: BoundedPropagator
-    aois: tuple[PreprocessedAoi]
-    interval: DateInterval
+def _get_logger() -> logging.Logger:
+    global __logger
+    if __logger is None:
+        __logger = logging.getLogger(__name__)
+    return __logger
 
 
 class AoiHandler(PythonEventHandler):
@@ -60,24 +36,56 @@ class AoiHandler(PythonEventHandler):
     def __init__(
         self,
         aoi: Aoi,
-        sat: Satellite,
-        sensor: CameraSensor,
-        builder: DateIntervalListBuilder = None,
+        sat: SatelliteModel,
+        sensor: CameraSensorModel,
+        builder: orekitfactory.time.DateIntervalListBuilder = None,
     ):
+        """Class constructor.
+
+        Args:
+            aoi (Aoi): The AOI being handled.
+            sat (Satellite): The satellite being processed.
+            sensor (CameraSensor): The sensor details
+            builder (DateIntervalListBuilder, optional): The list builder to use when
+            constructing the class. Defaults to None.
+        """
         super().__init__()
         self.__aoi = aoi
         self.__sat = sat
         self.__sensor = sensor
-        self.__builder = builder if builder else DateIntervalListBuilder()
+        self.__builder = builder if builder else orekitfactory.time.DateIntervalListBuilder()
         self.__logger = logging.getLogger(__name__)
 
     def init(self, initialstate, target, detector):
+        """Initialize the handler.
+
+        Args:
+            initialstate (SpacecraftState): The spacecraft state.
+            target (Any): The target.
+            detector (Any): The detector.
+        """
         pass
 
     def resetState(self, detector, oldState):
+        """Reset the state.
+
+        Args:
+            detector (Any): The detector.
+            oldState (Any): The old state.
+        """
         pass
 
     def eventOccurred(self, s, detector, increasing):
+        """Process an event.
+
+        Args:
+            s (SpacecraftState): Thg spacecraft state at time of event.
+            detector (EventDetector): The detector triggering the event.
+            increasing (bool): Whether the value is increasing or decreasing.
+
+        Returns:
+            _type_: _description_
+        """
         if increasing:
             self.__logger.debug("Exiting aoi=%s at %s", self.__aoi.id, s.getDate())
             self.__builder.add_stop(s.getDate())
@@ -87,6 +95,11 @@ class AoiHandler(PythonEventHandler):
         return Action.CONTINUE
 
     def result(self) -> PreprocessedAoi:
+        """Transform the data into the result object.
+
+        Returns:
+            PreprocessedAoi: The processed aoi.
+        """
         return PreprocessedAoi(
             aoi=self.__aoi,
             sat=self.__sat,
@@ -95,201 +108,114 @@ class AoiHandler(PythonEventHandler):
         )
 
 
-class Preprocessor:
-    """Satellite scheduler pre-processor.
+def _register_detector(uow: UnitOfWork, sensor: SensorModel, fov: FieldOfView, zone, handler: AoiHandler, aoi: Aoi):
+    _get_logger().debug("Registring for aoi: %s %s", aoi.id, aoi.country)
+    try:
+        detector: EventDetector = None
 
-    Execute this callable to run preprocessing for a single satellite.
-    """
-
-    def __init__(
-        self,
-        interval: DateInterval,
-        sat: Satellite,
-        aois: Iterable[Aoi],
-        sensor_id: str = None,
-        centralBody: ReferenceEllipsoid = None,
-        context: DataContext = None,
-        step: str = "PT10M",
-    ):
-        self.__interval = interval
-        self.__sat = sat
-        self.__aois = tuple(aois)
-        self.__centralBody = centralBody
-        self.__context = context
-        self.__step = step or "PT10M"
-        self.__last_result = None
-        self.__sensor_id = sensor_id
-
-    @property
-    def sat(self) -> Satellite:
-        return self.__sat
-
-    @property
-    def interval(self) -> DateInterval:
-        return self.__interval
-
-    @property
-    def aois(self) -> tuple[Aoi]:
-        return self.__aois
-
-    @property
-    def context(self) -> DataContext:
-        if not self.__context:
-            self.__context = DataContext.getDefault()
-        return self.__context
-
-    @property
-    def centralBody(self) -> ReferenceEllipsoid:
-        if not self.__centralBody:
-            self.__centralBody = orekitfactory.factory.get_reference_ellipsoid(
-                model="wgs84",
-                frameName="itrf",
-                simpleEop=False,
-                iersConventions="iers2010",
-                context=self.context,
-            )
-        return self.__centralBody
-
-    @cached_property
-    def stepSeconds(self) -> float:
-        return float(isodate.parse_duration(self.__step).total_seconds())
-
-    @cached_property
-    def logger(self) -> logging.Logger:
-        return logging.getLogger(__name__)
-
-    @property
-    def last_result(self) -> PreprocessingResult:
-        """The result of the last time this preprocessor was executed.
-
-        Returns:
-            PreprocessingResult: The last result, or None if this object hasn't been executed.
-        """
-        return self.__last_result
-    
-    def _build_detector(self, aoi, zone, sensor, fov):
-        if sensor.data.useNadirPointing:
-            return GeographicZoneDetector(self.centralBody, zone, 1.0e-6)
-        else:
-            sample_dist = max(20000., math.floor(math.sqrt(aoi.area / 1000)))
+        log_func = _get_logger().debug  # set here to adjust level after errors
+        if not sensor.data.useNadirPointing and sensor.has_fov:
+            _get_logger().debug("building footprint-zone detector for sensor=%s", sensor.id)
+            sample_dist = 20000.0
             tries = 4
             while tries > 0:
                 try:
-                    self.logger.debug(
-                        "creating detector with sample_dist=%f", sample_dist
-                    )
-                    return FootprintOverlapDetector(
-                        fov, self.centralBody, zone, float(sample_dist)
-                    ).withMaxCheck(30.0)
-                except:
+                    _get_logger().debug("creating detector with sample_dist=%f", sample_dist)
+                    detector = FootprintOverlapDetector(fov, uow.centralBody, zone, float(sample_dist))
+                    break
+                except BaseException:
                     tries -= 1
                     sample_dist *= 2
-                    if tries == 0:
-                        raise
-                    self.logger.debug("Caught and error building footprint detector, retrying", exc_info=1)
 
-    def __call__(self, test_mode: bool = False) -> PreprocessingResult:
-        """Execute this preprocessor."""
-        # initialize the satellite
-        self.logger.info("Initializing satellite %s", self.sat.id)
-        self.sat.init(context=self.context, earth=self.centralBody)
-
-        self.logger.info(
-            "Starting work for %s over timespan %s ", self.sat.id, self.interval
-        )
-
-        generator = EphemerisGenerator(self.sat.propagator)
-
-        # set the propagator at the start time before we do anything else
-        ephemerisInterval = self.interval.pad(timedelta(minutes=5))
-
-        # propagate the initial period
-        generator.propagate(
-            DateInterval(ephemerisInterval.start, self.interval.start), self.stepSeconds
-        )
-
-        # filter sensors if necessary
-        sensors = (
-            [self.sat.sensor(self.__sensor_id)]
-            if self.__sensor_id
-            else self.sat.sensors
-        )
-        fovs = {s.id: s.createFovInBodyFrame() for s in sensors}
-
-        # register aoi detectors per sensor
-        handlers = []
-        count = 0
-        for aoi in self.aois:
-            self.logger.debug("Building handlers for %s", aoi.id)
-            zone = aoi.createZone()
-            if not zone:
-                self.logger.debug("skipping aoi without zone aoi.id=%s", aoi.id)
-                continue
-
-            for sensor in sensors:
-                fov = fovs[sensor.id]
-                
-                handler = AoiHandler(
-                    aoi=aoi,
-                    sat=self.sat,
-                    sensor=sensor,
-                    builder=DateIntervalListBuilder(
-                        self.interval.start, self.interval.stop
-                    ),
-                )
-                handlers.append(handler)
-
-                self.logger.debug("Registring for aoi: %s %s", aoi.id, aoi.country)
-
-                try:
-                    if sensor.data.useNadirPointing:
-                        detector = GeographicZoneDetector(self.centralBody, zone, 1.0e-6)
-                    else:
-                        sample_dist = 20000.
-                        tries = 4
-                        while tries > 0:
-                            try:
-                                self.logger.debug(
-                                    "creating detector with sample_dist=%f", sample_dist
-                                )
-                                detector = FootprintOverlapDetector(
-                                    fov, self.centralBody, zone, float(sample_dist)
-                                ).withMaxCheck(30.0)
-                                break
-                            except:
-                                tries -= 1
-                                sample_dist *= 2
-                                if tries == 0:
-                                    raise
-                                self.logger.debug("Caught and error building footprint detector, retrying", exc_info=1)
-
-                    self.sat.propagator.addEventDetector(detector.withHandler(handler))
-                except orekit.JavaError:
-                    self.logger.error(
-                        "Caught exception while building footprint detector for aoi %s (%s) with area %f",
+                    if tries <= 0:
+                        log_func = _get_logger().warning
+                    log_func(
+                        "Caught and error building footprint detector [aoi=%s, country=%s, sensor=%s]",
                         aoi.id,
                         aoi.country,
-                        aoi.area,
+                        sensor.id,
                         exc_info=1,
                     )
 
-            count = count + 1
-            if test_mode and count > 10:
-                break
+        if not detector:
+            log_func("building nadir-zone detector for aoi=%s, country=%s, sensor=%s", aoi.id, aoi.country, sensor.id)
+            detector = GeographicZoneDetector(uow.centralBody, zone, 1.0e-6)
 
-        self.logger.info("propagating interval %s", self.interval)
-        generator.propagate(self.interval, self.stepSeconds)
+        uow.sat.propagator.addEventDetector(detector.withHandler(handler).withMaxCheck(60.0))
 
-        self.sat.propagator.clearEventsDetectors()
-        generator.propagate(
-            DateInterval(self.interval.stop, ephemerisInterval.stop), self.stepSeconds
+    except orekit.JavaError:
+        _get_logger().error(
+            "Caught exception while building footprint detector for aoi %s (%s) with area %f",
+            aoi.id,
+            aoi.country,
+            aoi.area,
+            exc_info=1,
         )
 
-        self.logger.info("Completed work for %s", self.sat.id)
-        self.__last_result = PreprocessingResult(
-            ephemeris=generator.build(atProv=self.sat.getAttitudeProvider("mission")),
-            sat=self.sat,
-            aois=tuple(h.result() for h in handlers),
-            interval=self.interval,
-        )
-        return self.__last_result
+
+def preprocess(uow: UnitOfWork) -> PreprocessingResult:
+    """Execute preprocessing.
+
+    Args:
+        test_mode (bool, optional): Indicate to run in 'test' mode. Defaults to False.
+
+    Returns:
+        PreprocessingResult: Results of preprocessing.
+    """
+    _get_logger().info("Starting work for %s over timespan %s ", uow.sat.id, uow.interval)
+
+    if uow.interval.duration <= dt.timedelta(seconds=0):
+        raise RuntimeError("Cannot preprocess over an invalid duration.")
+
+    generator = EphemerisGenerator(uow.sat.propagator)
+
+    # set the propagator at the start time before we do anything else
+    ephemerisInterval = uow.interval.pad(dt.timedelta(minutes=5))
+
+    # propagate the initial period
+    generator.propagate(orekitfactory.time.DateInterval(ephemerisInterval.start, uow.interval.start), uow.step)
+
+    # filter sensors if necessary and build fields of view
+    sensors = (uow.sat.sensor(id) for id in uow.sensor_ids) if uow.sensor_ids else uow.sat.sensors
+    fovs = {s.id: s.createFovInBodyFrame() for s in sensors}
+
+    # register aoi detectors per sensor
+    handlers = []
+    count = 0
+    for aoi in uow.aois:
+        _get_logger().debug("Building handlers for %s", aoi.id)
+        zone = aoi.createZone()
+        if not zone:
+            _get_logger().debug("skipping aoi without zone aoi.id=%s", aoi.id)
+            continue
+
+        for sensor in sensors:
+            fov = fovs[sensor.id]
+
+            handler = AoiHandler(
+                aoi=aoi,
+                sat=uow.sat,
+                sensor=sensor,
+                builder=orekitfactory.time.DateIntervalListBuilder(uow.interval.start, uow.interval.stop),
+            )
+            handlers.append(handler)
+
+            _register_detector(uow, sensor, fov, zone, handler, aoi)
+
+        count = count + 1
+        if uow.test_mode and count > 10:
+            break
+
+    _get_logger().info("propagating interval %s", uow.interval)
+    generator.propagate(uow.interval, uow.step.total_seconds())
+
+    uow.sat.propagator.clearEventsDetectors()
+    generator.propagate(orekitfactory.time.DateInterval(uow.interval.stop, ephemerisInterval.stop), uow.step)
+
+    _get_logger().info("Completed work for %s", uow.sat.id)
+    return PreprocessingResult(
+        ephemeris=generator.build(atProv=uow.sat.getAttitudeProvider("mission")),
+        sat=uow.sat,
+        aois=tuple(h.result() for h in handlers),
+        interval=uow.interval,
+    )

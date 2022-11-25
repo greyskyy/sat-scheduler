@@ -1,8 +1,8 @@
+"""Ephemeris generation."""
 import datetime as dt
 
 from org.orekit.propagation import Propagator, SpacecraftState
 from org.orekit.propagation.analytical import Ephemeris
-from org.orekit.time import AbsoluteDate
 from org.orekit.attitudes import AttitudeProvider, InertialProvider
 from java.util import ArrayList
 
@@ -28,6 +28,8 @@ def _as_timedelta(td: float | dt.timedelta) -> dt.timedelta:
 
 
 class EphemerisGenerator:
+    """Capture propagation output, generating an `Ephemeris` object from the results."""
+
     def __init__(self, propagator: Propagator):
         """Class construtor.
 
@@ -46,7 +48,8 @@ class EphemerisGenerator:
 
         Args:
             interval (DateInterval): The date interval over which to generate ephemeris.
-            step (float | dt.timedelta, optional): The ephemeris timestep. Defaults to dt.timedelta(minutes=1).
+            step (float | dt.timedelta, optional): The ephemeris timestep. Defaults to
+            dt.timedelta(minutes=1).
         """
         step = _as_timedelta(step)
 
@@ -65,6 +68,18 @@ class EphemerisGenerator:
             t = t.shiftedBy(adjusted_step)
 
     def build(self, atProv: AttitudeProvider = None) -> Ephemeris:
+        """Build the `Ephemeris` object using the pre-propagated data.
+
+        This method clears the the internal satellite ephemeris cache. Before calling
+        a second time the `propagate` method must be called at least once.
+
+        Args:
+            atProv (AttitudeProvider, optional): The attitude provider to attach to the
+            ephemeris object. Defaults to None.
+
+        Returns:
+            Ephemeris: The resulting ephemeris object.
+        """
         for i in range(self.__states.size() - 1, 0, -1):
             j = i - 1
             if (
@@ -99,7 +114,9 @@ class EphemerisGenerator:
         Args:
             propagator (Propagator): The source propagator.
             interval (DateInterval): The desired timespan over which to propagate.
-            step (float|timedelta, optional): The step size to take during propagation. Specified as a float number of seconds or a timedelta instance. Defaults to 1 minute.
+            step (float|timedelta, optional): The step size to take during propagation.
+            Specified as a float number of seconds or a timedelta instance. Defaults to
+            1 minute.
 
         Returns:
             Ephemeris: The generated ephemeris
@@ -107,23 +124,3 @@ class EphemerisGenerator:
         generator = EphemerisGenerator(propagator=propagator)
         generator.propagate(interval, step)
         return generator.build()
-
-        step = _as_timedelta(step)
-
-        steps, part = divmod(interval.duration, step)
-
-        if part > ZERO_TIMEDELTA:
-            steps = steps + 1
-
-        adjusted_step = (step / steps).total_seconds()
-
-        states = ArrayList(steps)
-
-        t = interval.start
-        while interval.contains(t, startInclusive=True, stopInclusive=True):
-            states.add(propagator.propagate(t))
-            t = t.shiftedBy(adjusted_step)
-
-        return Ephemeris(
-            states, int(2), float(0.001), InertialProvider.of(propagator.getFrame())
-        )

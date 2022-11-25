@@ -34,6 +34,15 @@ if __name__ == "__main__":
             group=pyrebar.Plugins.POSTINIT_GROUP,
         )
     )
+
+    pyrebar.Plugins.add_entrypoint(
+        EntryPoint(
+            name="check-config",
+            value="satscheduler.configuration.checker",
+            group=pyrebar.Plugins.APP_GROUP,
+        )
+    )
+
     pyrebar.Plugins.add_entrypoint(
         EntryPoint(
             name="aoi-tool",

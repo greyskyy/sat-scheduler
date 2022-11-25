@@ -1,32 +1,27 @@
-"""
-Container to load and manage AOIs within the 
-"""
-from astropy import units
-from pyproj import CRS
-from orekitfactory.utils import Dataloader
-from orekitfactory.utils import validate_quantity
-import math
+"""Utilities to load and manage AOIs."""
+import astropy.units as u
+import geopandas as gpd
+import logging
+import numpy as np
+import pyproj
 import shapely
+import shapely.errors
 import shapely.geometry
 import shapely.validation
-from shapely.geometry.polygon import Polygon
-import geopandas
-from geopandas import GeoDataFrame
-import numpy as np
+import warnings
+
+from orekitfactory.utils import Dataloader, validate_quantity
+from stactools.core.utils import antimeridian
 
 from org.hipparchus.geometry.spherical.twod import SphericalPolygonsSet
 from org.hipparchus.util import FastMath
 from org.orekit.models.earth.tessellation import EllipsoidTessellator
 from org.orekit.bodies import GeodeticPoint
 
-from stactools.core.utils import antimeridian
-
-import warnings
-import logging
-from shapely.errors import ShapelyDeprecationWarning
+from ..configuration import AoiConfiguration
 
 
-warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
+warnings.filterwarnings("ignore", category=shapely.errors.ShapelyDeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
@@ -39,7 +34,7 @@ class Aoi:
     def __init__(
         self,
         id: str,
-        polygon: Polygon,
+        polygon: shapely.geometry.Polygon,
         crs=None,
         continent: str = None,
         country: str = None,
@@ -47,7 +42,7 @@ class Aoi:
         alpha3: str = None,
         area: float = 0,
     ):
-        """Class construtor
+        """Class construtor.
 
         Args:
             id (str): The unique id of this area
@@ -57,6 +52,7 @@ class Aoi:
             country (str, optional): Country in which this aoi is defined. Defaults to None.
             alpha2 (str, optional): The 2-digit country code for this AOI. Defaults to None.
             alpha3 (str, optional): The 3-digit country code for this AOI. Defaults to None.
+            area (float, optional): The area of the AOI in square meters. Defaults to 0.
         """
         self.__id = id
         self.__polygon = polygon
@@ -69,20 +65,12 @@ class Aoi:
 
     @property
     def id(self) -> str:
-        """The AOI id
-
-        Returns:
-            str: The AOI id
-        """
+        """The AOI id."""
         return self.__id
 
     @property
-    def polygon(self) -> Polygon:
-        """The region of this AOI.
-
-        Returns:
-            Polygon: The shapely Polygon describing this aoi
-        """
+    def polygon(self) -> shapely.geometry.Polygon:
+        """The region of this AOI."""
         return self.__polygon
 
     @property
@@ -92,68 +80,41 @@ class Aoi:
 
     @property
     def alpha2(self) -> str:
-        """ISO 3166 two letter country code for this AOI's country, may be None if unset.
-
-        Returns:
-            str: 3166 alpha-2 country code, None if unset.
-        """
+        """ISO 3166 two letter country code for this AOI's country, may be None if unset."""
         return self.__alpha2
 
     @property
     def alpha3(self) -> str:
-        """ISO 3166 three letter country code of this AOI's country, may be None if unset.
-
-        Returns:
-            str: 3166 alpha-3 country code, None if unset.
-        """
+        """ISO 3166 three letter country code of this AOI's country, may be None if unset."""
         return self.__alpha3
 
     @property
     def country(self) -> str:
-        """The AOI's country, may be None if unset.
-
-        Returns:
-            str: The AOI country, None if unset.
-        """
+        """The AOI's country, may be None if unset."""
         return self.__country
 
     @property
     def continent(self) -> str:
-        """The continent for this aoi, may be None if unset.
-
-        Returns:
-            str: The AOI's continent, None if unset.
-        """
+        """The continent for this aoi, may be None if unset."""
         return self.__continent
 
     @property
     def crs(self):
-        """The CRS in which the polygon is defined.
-
-        This may be None, if unspecified in the constructor.
-
-        Returns:
-            CRS|Any: The crs of the aoi's polygon, if specified
-        """
+        """The CRS in which the polygon is defined; may be None, if unspecified in the constructor."""
         return self.__crs
 
     @property
     def area(self) -> float:
-        """The area of this aoi, in square meters.
-
-        Returns:
-            float: The area of this aoi, in square meters.
-        """
+        """The area of this aoi, in square meters."""
         return self.__area
 
-    def to_gdf(self) -> GeoDataFrame:
-        """Create a GeoDataFrame from this AOI
+    def to_gdf(self) -> gpd.GeoDataFrame:
+        """Create a GeoDataFrame from this AOI.
 
         Returns:
-            GeoDataFrame: A data frame for this AOI
+            GeoDataFrame: A data frame for this AOI.
         """
-
-        return GeoDataFrame(
+        return gpd.GeoDataFrame(
             data={
                 "aoi_id": [self.id],
                 "ISO_A2": [self.alpha2],
@@ -165,10 +126,8 @@ class Aoi:
             crs=self.crs,
         )
 
-    @units.quantity_input
-    def createZone(
-        self, tolerance: units.Quantity[units.m] = 1000 * units.m
-    ) -> SphericalPolygonsSet:
+    @u.quantity_input
+    def createZone(self, tolerance: u.Quantity[u.m] = 1000 * u.m) -> SphericalPolygonsSet:
         """Create the spherical polygons set, suitable for payload operations for this aoi.
 
         Returns:
@@ -176,23 +135,20 @@ class Aoi:
         """
         try:
             return _toZone(self.polygon)
-        except:
-            logging.getLogger(__name__).error(
-                "Error building aoi zone for aoi id=%s.",
-                self.id,
-                exc_info=1
-            )
+        except:  # noqa: E722 -- catch everything here to be sure we grab all the orekit errors.
+            logging.getLogger(__name__).error("Error building aoi zone for aoi id=%s.", self.id, exc_info=1)
             return None
 
 
 def loadIntoGdf(
-    url: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",  #'https://datahub.io/core/geo-countries/r/countries.geojson',
-    bbox: Polygon = None,
-) -> geopandas.GeoDataFrame:
+    url: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",  # noqa: E501
+    bbox: shapely.geometry.Polygon = None,
+) -> gpd.GeoDataFrame:
     """Load the source file into a GeoDataFrame.
 
     Args:
-        sourceUrl (str, optional): The file to load. Defaults to 'https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip'.
+        sourceUrl (str, optional): The file to load. Defaults to
+        'https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip'.
         bbox (Polygon, optional): A bounding box, specified as [lon1,lat1,lon2,lat2] in degrees. Defaults to None.
 
     Returns:
@@ -202,12 +158,10 @@ def loadIntoGdf(
     filepath = Dataloader.download(url=url)
 
     # read the fille
-    gdf = geopandas.read_file(filepath, bbox=bbox)
+    gdf = gpd.read_file(filepath, bbox=bbox)
 
     # project to equal-area
-    equal_area = gdf.to_crs(
-        "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs"
-    )
+    equal_area = gdf.to_crs("+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs")
     center = equal_area.geometry.centroid
     center = center.to_crs("EPSG:4326")
 
@@ -216,7 +170,7 @@ def loadIntoGdf(
     return gdf
 
 
-def _toZone(polygon: Polygon) -> SphericalPolygonsSet:
+def _toZone(polygon: shapely.geometry.Polygon) -> SphericalPolygonsSet:
     """Convert the polygon into an orekit SphericalPolygonsSet, suitable for use in the astrodynamics computation.
 
     Args:
@@ -230,9 +184,7 @@ def _toZone(polygon: Polygon) -> SphericalPolygonsSet:
     for p in polygon.boundary.coords:
         d_lat = abs(p[1] - prev[1])
         d_lon = abs(p[0] - prev[0])
-        if (d_lat < 0.000000001 or d_lat > 89.999999) and (
-            d_lon < 0.000000001 or d_lon > 359.99999
-        ):
+        if (d_lat < 0.000000001 or d_lat > 89.999999) and (d_lon < 0.000000001 or d_lon > 359.99999):
             continue
 
         points.append(
@@ -251,10 +203,10 @@ def _buildAoi(
     alpha2: str = None,
     continent: str = None,
     country: str = None,
-    crs: CRS = None,
+    crs: pyproj.CRS = None,
     area: float = 0,
 ) -> Aoi:
-    """Build an AOI from the provided geometry
+    """Build an AOI from the provided geometry.
 
     Args:
         geometry (GeoSeries|Polygon|MultiPolygon): The aoi polygon.
@@ -270,7 +222,7 @@ def _buildAoi(
     Yields:
         Generator[Aoi]: A generator enumerating all the AOIs built from this geometry
     """
-    ccw = shapely.geometry.polygon.orient(Polygon(shell=geometry.exterior))
+    ccw = shapely.geometry.polygon.orient(shapely.geometry.Polygon(shell=geometry.exterior))
 
     return Aoi(
         id.replace(" ", "_"),
@@ -284,34 +236,44 @@ def _buildAoi(
     )
 
 
-def loadAois(
-    url: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",
+def load_aois(
+    config: AoiConfiguration,
+    url: str = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip",  # noqa: E501
     bbox: tuple[float, float, float, float] = None,
-    buffer: units.Quantity[units.m] | float | str = 20000 * units.m,
-    tolerance: units.Quantity[units.m] | float | str = 1000 * units.m,
+    buffer: u.Quantity[u.m] | float | str = 20000 * u.m,
     filter: dict = None,
     **kwargs
 ) -> list[Aoi]:
     """Load the AOIs from the source as a list of Aoi objects.
 
-    If the `buffer` parameter is greater than 0, all AOIs will have their boundary expanded, as defined by the geopandsas.GeoSeries.buffer method.
-    If the `tolerance` parameter is greater than 0, the aois will have their boundaries simplified.
+    When the `config` parameter is specified, it overrides all other parameters.
+
+    If the `buffer` parameter is greater than 0, all AOIs will have their boundary expanded, as defined by the
+    geopandsas.GeoSeries.buffer method.
 
     Args:
-        sourceUrl (str, optional): The url from which to load the AOI Must be consumable by geopandas.GeoDataFrame.load_file. Defaults to "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip".
-        bbox (tuple[float, float, float, float], optional): Bounding box limiting the regions to read. A 4-tuple of [min_lon, min_lat, max_lon, max_lat]. Defaults to None.
+        config (AoiConfigurational, optional): The configuration option to use when loading AOIs. Defaults to None.
+        url (str, optional): The url from which to load the AOI Must be consumable by
+        geopandas.GeoDataFrame.load_file. Defaults to
+        "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip".
+        bbox (tuple[float, float, float, float], optional): Bounding box limiting the regions to read. A 4-tuple of
+        [min_lon, min_lat, max_lon, max_lat]. Defaults to None.
         buffer (units.Quantity[units.m], optional): Amount to buffer each aoi. Defaults to 20km.
-        tolerance (units.Quantity[units.m], optional): Minimum spacing of points, used to reduce the fidelidy of polygons. Defaults to 1km.
         filter (dict, optional): Dictionary of filters to apply.
+
     Returns:
         list[Aoi]: The list of loaded Aoi objects.
     """
-
     logger = logging.getLogger(__name__)
     logger.debug("loading aois from %s", url)
 
-    buffer = validate_quantity(buffer, units.m)
-    tolerance = validate_quantity(tolerance, units.m)
+    if config:
+        bbox = config.bbox
+        buffer = config.buffer
+        url = config.url
+        filter = config.filter
+
+    buffer = validate_quantity(buffer, u.m)
 
     # build a bounding box, if one is loaded
     box = None
@@ -328,7 +290,7 @@ def loadAois(
     crs = gdf.crs
 
     if crs is None:
-        crs = CRS.from_string("EPSG:4326")
+        crs = pyproj.CRS.from_string("EPSG:4326")
         gdf.set_crs(crs)
 
     if filter:
@@ -339,12 +301,12 @@ def loadAois(
                 gdf = gdf.loc[gdf[k] == v]
 
     # buffer
-    if buffer > 0 * units.m:
+    if buffer > 0 * u.m:
         gdf.to_crs(
             "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs",
             inplace=True,
         )
-        gds = gdf.buffer(buffer.to_value(units.m))
+        gds = gdf.buffer(buffer.to_value(u.m))
         gdf.geometry = gds
         gdf.to_crs(crs, inplace=True)
 
@@ -352,17 +314,17 @@ def loadAois(
         gdf = gdf.explode(ignore_index=True)
 
         # antartica has an inf lonspan, just filter it. we're not adjusting the antimeridian
-        lonspan = (gdf.bounds["maxx"] - gdf.bounds["minx"]).replace(np.inf, 0.)
+        lonspan = (gdf.bounds["maxx"] - gdf.bounds["minx"]).replace(np.inf, 0.0)
         mask = lonspan > 180
-                
+
         gdf.loc[mask, "geometry"] = gdf.loc[mask, "geometry"].apply(antimeridian.split)
-        
+
     gdf = gdf.explode(ignore_index=True)
 
     # compute the area
     area_df = gdf.to_crs("EPSG:6933")
     area = area_df.geometry.area
-    gdf["area"] = area.replace(np.nan, 14.2e14) #antarctica's area is nan, set to 14.6e6 km^2
+    gdf["area"] = area.replace(np.nan, 14.2e14)  # antarctica's area is nan, set to 14.6e6 km^2
 
     aois = []
     for index, row in gdf.iterrows():

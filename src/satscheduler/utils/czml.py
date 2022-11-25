@@ -10,6 +10,8 @@ __all__ = ["Polygon"]
 
 @czml3.core.attr.s(str=False, frozen=True, kw_only=True)
 class Polygon(czml3.base.BaseCZMLObject):
+    """Extension of czml3.properties.Polygon that includes outline properties."""
+
     fill = czml3.core.attr.ib(default=None)
     outline = czml3.core.attr.ib(default=None)
     outlineColor = czml3.core.attr.ib(default=None)

@@ -3,6 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - astropy
+  - dacite
   - isodate
   - geopandas
   - numpy
@@ -14,12 +15,13 @@ dependencies:
   - czml3
   
   # dev dependencies
+  - black
+  - build
+  - flake8
+  - flake8-docstrings
+  - pep517
   - pytest
   - pytest-cov
-  - black
-  - flake8
   - pip:
-    # TODO: versions here
-    - stactools
-    - git+https://github.com/greyskyy/py-rebar.git
-    - git+https://github.com/greyskyy/orekit-factory.git
+    - py-rebar
+    - orekit-factory
