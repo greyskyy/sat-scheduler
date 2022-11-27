@@ -5,7 +5,15 @@
     "version": "0.2.0",
     "configurations": [
 
-        
+        {
+            "name": "Python: Check config",
+            "type": "python",
+            "request": "launch",
+            "program": "src/",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": ["check"]
+        },
         {
             "name": "Python: List AOIs",
             "type": "python",
@@ -13,7 +21,7 @@
             "program": "src/",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["--run-tool", "list_aoi"]
+            "args": ["aois", "--czml"]
         },
         {
             "name": "Python: preprocess",
@@ -22,7 +30,7 @@
             "program": "src/",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["--run-tool", "preprocess", "--debug"]
+            "args": ["preprocess", "--test"]
         }
     ]
 }

@@ -1,0 +1,20 @@
+
+[run]
+branch=True
+omit=
+    # ignore tests
+    **/tests/*
+
+[report]
+fail_under=00
+precision=0
+
+[html]
+directory=.build/test_cov_html
+
+[xml]
+output=.build/test_cov.xml
+
+[json]
+output=.build/test_cov.json
+pretty_print=True

@@ -1,7 +1,14 @@
 .data
 .build
+.build/*
 
 *.html
+*.czml
+*.csv
+
+.coverage
 
 __pycache__
 **/__pycache__
+
+example.py

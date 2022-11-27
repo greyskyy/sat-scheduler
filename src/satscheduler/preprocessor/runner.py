@@ -1,136 +1,129 @@
-from datetime import timedelta
-from functools import reduce
-from threading import Thread
-from typing import Iterable
-import satscheduler.aoi as aoi
-from satscheduler.preprocessor import Preprocessor, PreprocessingResult
-from satscheduler.satellite import Satellites
+"""Preprocessing executor.
 
+Manage the loading and threaded execution of preprocessing across multiple satellites.
+"""
+import concurrent.futures
 import logging
-from ..tools.preprocess import preprocess
+import orekitfactory.factory
+import orekitfactory.initializer
+import orekitfactory.time
+import orekitfactory.utils
+import typing
 
-from satscheduler.utils import DateInterval, string_to_absolutedate, OrekitUtils
+from .core import PreprocessingResult, UnitOfWork
+from .preprocessor import preprocess
+
+from ..aoi import load_aois, Aoi
+from ..configuration import Configuration, get_config
+from ..models import load_satellite_models, SatelliteModel
+from ..utils import maybe_attach_thread
+
 from org.orekit.data import DataContext
+from org.orekit.models.earth import ReferenceEllipsoid
+
+_logger: logging.Logger = None
 
 
-class Worker:
-    def __init__(self, vm, callable, test_mode):
-        self.vm = vm
-        self.callable = callable
-        self.test_mode = test_mode
-
-    def __call__(self):
-        try:
-            self.vm.attachCurrentThread()
-            self.callable(self.test_mode)
-        except:
-            logging.getLogger(__name__).error(
-                "Caught exception during pre-processing", exc_info=1, stack_info=True
-            )
+def _get_logger() -> logging.Logger:
+    global _logger
+    if _logger is None:
+        _logger = logging.getLogger(__name__)
+    return _logger
 
 
-def run_preprocessing(
-    vm, preprocessors: Iterable[Preprocessor] = [], args=None, config=None
+def run_units_of_work(
+    uows: typing.Sequence[UnitOfWork] = [], args=None, config: Configuration = None
 ) -> list[PreprocessingResult]:
-    """Execute the provided preprocessors.
-
-    Execution may occur on multiple threads, or on the same thread, depending on the multithreading configuration.
+    """Execute the provided preprocessing units of work.
 
     Args:
-        vm (any): The orekit VM.
-        preprocessors (Iterable[Preprocessor], optional): Preprocessors to execute. Defaults to [].
-        args (argparse.Namespace, optional): The command line arguments. Defaults to None.
-        config (dist, optional): The application configuration. Defaults to None.
+        uows (typing.Sequence[UnitOfWork], optional): _description_. Defaults to [].
+        args (_type_, optional): _description_. Defaults to None.
+        config (Configuration, optional): _description_. Defaults to None.
 
     Returns:
         list[PreprocessedAoi]: The preproessing results
     """
     shouldThread = True
-    if args and args.threading is not None:
+    if args and "threading" in args and args.threading is not None:
         shouldThread = args.threading
-    elif config and "run" in config and "multithread" in config["run"]:
-        shouldThread = config["run"]["multithread"]
+    elif config and config.run.multithread:
+        shouldThread = config.run.multithread
 
-    logging.getLogger(__name__).debug(
-        "Executing %d preprocessors [multithreading=%s]",
-        len(preprocessors),
+    if shouldThread and len(uows) < 2:
+        shouldThread = False
+        _get_logger().debug("Disabling preprocessing threading for a single unit of work.")
+
+    _get_logger().debug(
+        "Executing %d preprocessing units of work [multithreading=%s]",
+        len(uows),
         shouldThread,
     )
 
-    if shouldThread and len(preprocessors) < 2:
-        shouldThread = False
-        logging.getLogger(__name__).debug(
-            "Disabling preprocessing threading for a single preprocessor."
-        )
-
     if shouldThread:
-        threads = []
-        for p in preprocessors:
-            thread = Thread(target=Worker(vm, p, args.test))
-            thread.start()
-            threads.append(thread)
-
-        for thread in threads:
-            thread.join()
+        with concurrent.futures.ThreadPoolExecutor(initializer=maybe_attach_thread) as executor:
+            futures = [executor.submit(preprocess, uow) for uow in uows]
+            results = [f.result() for f in concurrent.futures.as_completed(futures)]
     else:
-        for p in preprocessors:
-            p(args.test)
+        results = [preprocess(uow) for uow in uows]
 
-    return [p.last_result for p in preprocessors]
+    _get_logger().info("Completed preprocessing for %d units of work", len(uows))
+    return results
 
 
-def execute_preprocessing(
-    args=None, config=None, vm=None, context: DataContext = None
-) -> list[PreprocessingResult]:
-    """Execute preprocessing.
-
-    This function loads satellites and aois, then executes preprocessing
+def create_uows(
+    args=None,
+    config: Configuration = None,
+    aois: typing.Sequence[Aoi] = None,
+    sat_models: typing.Sequence[SatelliteModel] = None,
+    context: DataContext = None,
+    earth: ReferenceEllipsoid = None,
+) -> list[UnitOfWork]:
+    """Generate a set of proprocessing units of work.
 
     Args:
-        args (argparse.Namespace, optional): The command line arguments. Defaults to None.
-        config (dict, optional): A dictionary loaded with the application configuration file's contents. Defaults to None.
-        vm (_type_, optional): A reference to the orekit virtual machine. Defaults to None.
+        args (argparse.Namespace, optional): Command line arguments. Defaults to None.
+        config (Configuration, optional): Application configuration. Defaults to None.
+
+    Returns:
+        list[UnitOfWork]: List of preprocessing units of work.
     """
-    logger = logging.getLogger(__name__)
+    logger = _get_logger()
+    if not config:
+        config = get_config()
 
-    logger.info("Loading aoi and satellite data.")
-
-    # load the aois
-    aois = aoi.loadAois(sourceUrl=config["aois"]["url"])
-    logger.debug("Loaded %d aois", len(aois))
-
-    # load the satellites
-    sats = Satellites.load_from_config(config)
-    logger.debug("Loaded %d satellites", len(sats))
-
-    # set context and date interval
-    if context is None:
+    if not context:
         context = DataContext.getDefault()
 
-    timespan = DateInterval(
-        string_to_absolutedate(config["run"]["start"], context=context),
-        string_to_absolutedate(config["run"]["stop"], context=context),
+    if not earth:
+        earth = orekitfactory.factory.get_reference_ellipsoid(context=context)
+
+    if not aois:
+        aois = load_aois(config.aois)
+        logger.info("Loaded %d aois", len(aois))
+
+    if not sat_models:
+        sat_models = load_satellite_models(config=config, context=context, earth=earth)
+        logger.info("Loaded %d satellite models", len(sat_models))
+
+    test_mode = False
+    if args and "test" in args:
+        test_mode = args.test
+
+    timespan = orekitfactory.time.DateInterval(
+        orekitfactory.factory.to_absolute_date(config.run.start, context=context),
+        orekitfactory.factory.to_absolute_date(config.run.stop, context=context),
     )
 
-    # load the reference ellipsoid
-    if "earth" in config:
-        earth = OrekitUtils.referenceEllipsoid(context=context, **(config["earth"]))
-    else:
-        earth = OrekitUtils.referenceEllipsoid(model="wgs-84", context=context)
-
-    # create the preprocessors
-    step = config["control"]["step"]
-    preprocessors = [
-        Preprocessor(timespan, sat, aois, centralBody=earth, context=context, step=step)
-        for sat in sats
+    return [
+        UnitOfWork(
+            aois=aois,
+            interval=timespan,
+            sat=sat,
+            centralBody=earth,
+            context=context,
+            step=config.run.step,
+            test_mode=test_mode,
+        )
+        for sat in sat_models
     ]
-
-    logger.info("Executing %d preprocessors.", len(preprocessors))
-
-    # make the donuts
-    results = run_preprocessing(
-        vm, preprocessors=preprocessors, args=args, config=config
-    )
-
-    logger.critical("Preprocessing completed.")
-    return results

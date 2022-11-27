@@ -1,98 +1,33 @@
-from dataclasses import dataclass
-from datetime import timedelta
-from typing import Iterable
-
-from functools import cached_property
-from satscheduler.utils import DateIntervalList, SafeListBuilder, DateInterval
-from .linebuilder import LineBuilder
-from .nadirtrace import NadirTrace
-from satscheduler.aoi import Aoi
-
-from satscheduler.utils import OrekitUtils, EphemerisGenerator
+"""Scheduling preprocessor. Load AOI and satellite ephemeris, then compute inviews."""
+import logging
+import datetime as dt
+import orekit
+import orekitfactory.factory
+import orekitfactory.time
 
 from org.hipparchus.ode.events import Action
-from org.hipparchus.util import FastMath
-from org.orekit.data import DataContext
-from org.orekit.models.earth import ReferenceEllipsoid
-from org.orekit.propagation import BoundedPropagator, Propagator
-from org.orekit.time import AbsoluteDate
-from satscheduler.satellite import CameraSensor, Satellite, ScheduleableSensor
-
+from org.orekit.geometry.fov import FieldOfView
 from org.orekit.propagation.events import (
-    LongitudeCrossingDetector,
+    EventDetector,
     FootprintOverlapDetector,
     GeographicZoneDetector,
 )
 from org.orekit.propagation.events.handlers import PythonEventHandler
 
-from org.hipparchus.geometry.euclidean.threed import Rotation, Vector3D
+from ..aoi import Aoi
+from ..models import CameraSensorModel, SatelliteModel, SensorModel
+from ..utils import EphemerisGenerator
 
-import logging
-import isodate
-import numpy as np
+from .core import PreprocessedAoi, PreprocessingResult, UnitOfWork
 
-
-@dataclass(frozen=True)
-class PreprocessedAoi:
-    aoi: Aoi
-    sat: Satellite
-    sensor: CameraSensor
-    intervals: DateIntervalList
+__logger = None
 
 
-class LongitudeWrapHandler(PythonEventHandler):
-    """Orbit event handler, detecting a wrap around at 180 degrees longitude.
-
-    This handler is used to split the nadir trace, so that it draws properly
-    on the folium map.
-    """
-
-    def __init__(self, tracer: NadirTrace):
-        """Class constructor
-
-        Args:
-            tracer (NadirTrace): The nadir tracer recording the sub-satellite point.
-        """
-        super().__init__()
-        self.__tracer = tracer
-
-    def init(self, initialstate, target, detector):
-        pass
-
-    def resetState(self, detector, oldState):
-        pass
-
-    def eventOccurred(self, s, detector, increasing):
-        try:
-            self.__tracer.addStateAndNewline(s)
-            return Action.CONTINUE
-        except BaseException as e:
-            logging.getLogger(self.__class__.__name__).exception(
-                "Caught exception in longitude handler.", exc_info=e
-            )
-            raise e
-
-
-"""
-class OrbitHandler(PythonEventHandler):
-    def __init__(self):
-        super().__init__()
-        self.__times = []
-      
-    def init(self, initialstate, target, detector):
-        pass
-
-    def resetState(self, detector, oldState):
-        pass
-    
-    def eventOccurred(self, s, detector, increasing):
-        if increasing:
-            self.__times.append(s.getDate())
-        return Action.CONTINUE
-    
-    @property
-    def 
-"""
+def _get_logger() -> logging.Logger:
+    global __logger
+    if __logger is None:
+        __logger = logging.getLogger(__name__)
+    return __logger
 
 
 class AoiHandler(PythonEventHandler):
@@ -101,39 +36,70 @@ class AoiHandler(PythonEventHandler):
     def __init__(
         self,
         aoi: Aoi,
-        sat: Satellite,
-        sensor: CameraSensor,
-        builder: SafeListBuilder = None,
+        sat: SatelliteModel,
+        sensor: CameraSensorModel,
+        builder: orekitfactory.time.DateIntervalListBuilder = None,
     ):
+        """Class constructor.
+
+        Args:
+            aoi (Aoi): The AOI being handled.
+            sat (Satellite): The satellite being processed.
+            sensor (CameraSensor): The sensor details
+            builder (DateIntervalListBuilder, optional): The list builder to use when
+            constructing the class. Defaults to None.
+        """
         super().__init__()
         self.__aoi = aoi
         self.__sat = sat
         self.__sensor = sensor
-        self.__builder = builder if builder else SafeListBuilder()
-        self.__logger = logging.getLogger(self.__class__.__name__)
+        self.__builder = builder if builder else orekitfactory.time.DateIntervalListBuilder()
+        self.__logger = logging.getLogger(__name__)
 
     def init(self, initialstate, target, detector):
+        """Initialize the handler.
+
+        Args:
+            initialstate (SpacecraftState): The spacecraft state.
+            target (Any): The target.
+            detector (Any): The detector.
+        """
         pass
 
     def resetState(self, detector, oldState):
+        """Reset the state.
+
+        Args:
+            detector (Any): The detector.
+            oldState (Any): The old state.
+        """
         pass
 
     def eventOccurred(self, s, detector, increasing):
-        try:
-            if increasing:
-                self.__logger.debug("Exiting aoi=%s at %s", self.__aoi.id, s.getDate())
-                self.__builder.add_stop(s.getDate())
-            else:
-                self.__logger.debug("Entering aoi=%s at %s", self.__aoi.id, s.getDate())
-                self.__builder.add_start(s.getDate())
-            return Action.CONTINUE
-        except BaseException as e:
-            self.__logger.exception(
-                "Caught exception processing aoi=%s", self.__aoi.id, exc_info=e
-            )
-            raise e
+        """Process an event.
+
+        Args:
+            s (SpacecraftState): Thg spacecraft state at time of event.
+            detector (EventDetector): The detector triggering the event.
+            increasing (bool): Whether the value is increasing or decreasing.
+
+        Returns:
+            _type_: _description_
+        """
+        if increasing:
+            self.__logger.debug("Exiting aoi=%s at %s", self.__aoi.id, s.getDate())
+            self.__builder.add_stop(s.getDate())
+        else:
+            self.__logger.debug("Entering aoi=%s at %s", self.__aoi.id, s.getDate())
+            self.__builder.add_start(s.getDate())
+        return Action.CONTINUE
 
     def result(self) -> PreprocessedAoi:
+        """Transform the data into the result object.
+
+        Returns:
+            PreprocessedAoi: The processed aoi.
+        """
         return PreprocessedAoi(
             aoi=self.__aoi,
             sat=self.__sat,
@@ -142,232 +108,114 @@ class AoiHandler(PythonEventHandler):
         )
 
 
-@dataclass(frozen=True)
-class PreprocessingResult:
-    sensor: ScheduleableSensor
-    sat: Satellite
-    ephemeris: BoundedPropagator
-    aois: tuple[PreprocessedAoi]
+def _register_detector(uow: UnitOfWork, sensor: SensorModel, fov: FieldOfView, zone, handler: AoiHandler, aoi: Aoi):
+    _get_logger().debug("Registring for aoi: %s %s", aoi.id, aoi.country)
+    try:
+        detector: EventDetector = None
 
+        log_func = _get_logger().debug  # set here to adjust level after errors
+        if not sensor.data.useNadirPointing and sensor.has_fov:
+            _get_logger().debug("building footprint-zone detector for sensor=%s", sensor.id)
+            sample_dist = 20000.0
+            tries = 4
+            while tries > 0:
+                try:
+                    _get_logger().debug("creating detector with sample_dist=%f", sample_dist)
+                    detector = FootprintOverlapDetector(fov, uow.centralBody, zone, float(sample_dist))
+                    break
+                except BaseException:
+                    tries -= 1
+                    sample_dist *= 2
 
-class Preprocessor:
-    def __init__(
-        self,
-        interval: DateInterval,
-        sat: Satellite,
-        aois: Iterable[Aoi],
-        centralBody: ReferenceEllipsoid = None,
-        context: DataContext = None,
-        step: str = "PT10M",
-    ):
-        self.__interval = interval
-        self.__sat = sat
-        self.__aois = tuple(aois)
-        self.__centralBody = centralBody
-        self.__context = context
-        self.__step = step or "PT10M"
-        self.__last_result = None
+                    if tries <= 0:
+                        log_func = _get_logger().warning
+                    log_func(
+                        "Caught and error building footprint detector [aoi=%s, country=%s, sensor=%s]",
+                        aoi.id,
+                        aoi.country,
+                        sensor.id,
+                        exc_info=1,
+                    )
 
-    @property
-    def sat(self) -> Satellite:
-        return self.__sat
+        if not detector:
+            log_func("building nadir-zone detector for aoi=%s, country=%s, sensor=%s", aoi.id, aoi.country, sensor.id)
+            detector = GeographicZoneDetector(uow.centralBody, zone, 1.0e-6)
 
-    @property
-    def interval(self) -> DateInterval:
-        return self.__interval
+        uow.sat.propagator.addEventDetector(detector.withHandler(handler).withMaxCheck(60.0))
 
-    @property
-    def aois(self) -> tuple[Aoi]:
-        return self.__aois
-
-    @property
-    def context(self) -> DataContext:
-        if not self.__context:
-            self.__context = DataContext.getDefault()
-        return self.__context
-
-    @property
-    def centralBody(self) -> ReferenceEllipsoid:
-        if not self.__centralBody:
-            self.__centralBody = OrekitUtils.referenceEllipsoid(
-                "wgs84",
-                frameName="itrf",
-                simpleEop=False,
-                iersConventions="iers2010",
-                context=self.context,
-            )
-        return self.__centralBody
-
-    @cached_property
-    def stepSeconds(self) -> float:
-        return float(isodate.parse_duration(self.__step).total_seconds())
-
-    @cached_property
-    def logger(self) -> logging.Logger:
-        return logging.getLogger(self.__class__.__name__)
-
-    @property
-    def last_result(self) -> PreprocessingResult:
-        """The result of the last time this preprocessor was executed.
-
-        Returns:
-            PreprocessingResult: The last result, or None if this object hasn't been executed.
-        """
-        return self.__last_result
-
-    def __call__(self, test_mode: bool = False) -> PreprocessingResult:
-        """Exeucte this preprocessor."""
-        # initialize the satellite
-        self.logger.info("Initializing satellite %s", self.sat.id)
-        self.sat.init(context=self.context, earth=self.centralBody)
-
-        propagator = self.sat.propagator
-
-        self.logger.critical(
-            "Starting work for %s over timespan %s ", self.sat.id, self.interval
+    except orekit.JavaError:
+        _get_logger().error(
+            "Caught exception while building footprint detector for aoi %s (%s) with area %f",
+            aoi.id,
+            aoi.country,
+            aoi.area,
+            exc_info=1,
         )
-        
-        generator = EphemerisGenerator(propagator)
 
-        # set the propagator at the start time before we do anything else
-        ephemerisInterval = self.interval.pad(timedelta(minutes=5))
-        
-        # propagate the initial period
-        generator.propagate(DateInterval(ephemerisInterval.start, self.interval.start), self.stepSeconds)
 
-        
-        #ephemeris = EphemerisGenerator.generate(propagator, ephemerisInterval, step=self.stepSeconds)
+def preprocess(uow: UnitOfWork) -> PreprocessingResult:
+    """Execute preprocessing.
 
-        
-        """ move to a graphics component
-        print("registring for events")
-        # register an event detector to avoid line wrapping on the map
-        nadirLine = LineBuilder(
-            **(
-                {"tooltip": item.sat.name, "color": item.sat.displayColor}
-                | item.sat.groundTraceConfig
-            )
-        )
-        nadirTracer = NadirTrace(centralBody, nadirLine)
-        propagator.addEventDetector(
-            LongitudeCrossingDetector(centralBody, FastMath.PI).withHandler(
-                LongitudeWrapHandler(nadirTracer)
-            )
-        )
-        """
+    Args:
+        test_mode (bool, optional): Indicate to run in 'test' mode. Defaults to False.
 
-        # register aoi detectors per sensor
-        handlers = []
-        count = 0
-        # for sensor in self.sat.sensors:
-        #    fov = sensor.createFovInBodyFrame()
+    Returns:
+        PreprocessingResult: Results of preprocessing.
+    """
+    _get_logger().info("Starting work for %s over timespan %s ", uow.sat.id, uow.interval)
 
-        sensor_idx = 0
-        sensor = self.sat.sensors[sensor_idx]
-        fov = sensor.createFovInBodyFrame()
+    if uow.interval.duration <= dt.timedelta(seconds=0):
+        raise RuntimeError("Cannot preprocess over an invalid duration.")
 
-        # register aoi detectors
-        handlers = []
-        count = 0
-        for aoi in self.aois:
+    generator = EphemerisGenerator(uow.sat.propagator)
+
+    # set the propagator at the start time before we do anything else
+    ephemerisInterval = uow.interval.pad(dt.timedelta(minutes=5))
+
+    # propagate the initial period
+    generator.propagate(orekitfactory.time.DateInterval(ephemerisInterval.start, uow.interval.start), uow.step)
+
+    # filter sensors if necessary and build fields of view
+    sensors = (uow.sat.sensor(id) for id in uow.sensor_ids) if uow.sensor_ids else uow.sat.sensors
+    fovs = {s.id: s.createFovInBodyFrame() for s in sensors}
+
+    # register aoi detectors per sensor
+    handlers = []
+    count = 0
+    for aoi in uow.aois:
+        _get_logger().debug("Building handlers for %s", aoi.id)
+        zone = aoi.createZone()
+        if not zone:
+            _get_logger().debug("skipping aoi without zone aoi.id=%s", aoi.id)
+            continue
+
+        for sensor in sensors:
+            fov = fovs[sensor.id]
+
             handler = AoiHandler(
                 aoi=aoi,
-                sat=self.sat,
+                sat=uow.sat,
                 sensor=sensor,
-                builder=SafeListBuilder(self.interval.start, self.interval.stop),
+                builder=orekitfactory.time.DateIntervalListBuilder(uow.interval.start, uow.interval.stop),
             )
             handlers.append(handler)
 
-            try:
-                self.logger.debug("Registring for aoi: %s", aoi.id)
-                for zone in aoi.createZones():
-                    propagator.addEventDetector(
-                        FootprintOverlapDetector(
-                            fov, self.centralBody, zone, 10000.0
-                        ).withHandler(handler)
-                    )
-            except BaseException as e:
-                self.logger.warning(
-                    "Caught exception building zones, skipping %s", aoi.id, exc_info=e
-                )
+            _register_detector(uow, sensor, fov, zone, handler, aoi)
 
-            count = count + 1
-            if test_mode and count > 10:
-                break
+        count = count + 1
+        if uow.test_mode and count > 10:
+            break
 
-        generator.propagate(self.interval, self.stepSeconds)
-        #self._propagate(propagator)
-        """
-        # do the work
-        propTime = self.interval.stop.durationFrom(self.interval.start)
-        elapsed = 0.0
+    _get_logger().info("propagating interval %s", uow.interval)
+    generator.propagate(uow.interval, uow.step.total_seconds())
 
-        self.logger.debug("Propagating over time")
-        while elapsed <= propTime:
-            t = self.interval.start.shiftedBy(elapsed)
-            try:
-                state = propagator.propagate(t)
-                # nadirTracer.addState(state)
+    uow.sat.propagator.clearEventsDetectors()
+    generator.propagate(orekitfactory.time.DateInterval(uow.interval.stop, ephemerisInterval.stop), uow.step)
 
-                # if activityBuilder.isInActivity:
-                #    activityBuilder.addState(state)
-
-                elapsed += stepSeconds
-            except BaseException as e:
-                self.logger.exception("Caught exception processing sat=%s at time %s.", self.sat.id, t.toString(), exc_info=e)
-                raise e
-        """
-        """
-        nadirLine.finished()
-        if not "show" in item.sat.groundTraceConfig or item.sat.groundTraceConfig["show"]:
-            for l in nadirLine:
-                l.add_to(item.map)
-
-        for a in activityBuilder.activities:
-            if not a.footprint is None:
-                a.add_to(item.map, color="red")
-        """
-
-        propagator.clearEventsDetectors()
-        generator.propagate(DateInterval(self.interval.stop, ephemerisInterval.stop), self.stepSeconds)
-
-        self.logger.info("Completed work for %s", self.sat.id)
-        self.__last_result = PreprocessingResult(
-            ephemeris=generator.build(),
-            sat=self.sat,
-            aois=tuple(h.result() for h in handlers),
-            sensor=None,
-        )
-        return self.__last_result
-
-    def _init_propagator(self, propagator: Propagator, ivl: DateInterval = None):
-        if ivl is None:
-            ivl = self.interval
-        self.logger.debug("Initially propagating to %s", ivl.start.toString())
-        propagator.propagate(ivl.start)
-
-    def _propagate(self, propagator: Propagator, ivl: DateInterval = None):
-        if ivl is None:
-            ivl = self.interval
-
-        propTime = ivl.duration_secs
-        elapsed = 0.0
-
-        self.logger.debug("Propagating over time")
-        steps = 0
-        while elapsed <= propTime:
-            t = ivl.start.shiftedBy(elapsed)
-            try:
-                propagator.propagate(t)
-                elapsed += self.stepSeconds
-            except BaseException as e:
-                self.logger.exception(
-                    "Caught exception processing sat=%s at time %s.",
-                    self.sat.id,
-                    t.toString(),
-                    exc_info=e,
-                )
-                raise e
-            steps = steps + 1
-
-        print(f"propagated {steps} steps by {self.stepSeconds} seconds")
+    _get_logger().info("Completed work for %s", uow.sat.id)
+    return PreprocessingResult(
+        ephemeris=generator.build(atProv=uow.sat.getAttitudeProvider("mission")),
+        sat=uow.sat,
+        aois=tuple(h.result() for h in handlers),
+        interval=uow.interval,
+    )

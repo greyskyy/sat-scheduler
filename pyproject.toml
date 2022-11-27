@@ -1,41 +1,82 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools", "setuptools_scm[toml]>7.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sat-scheduler"
 description = "A simple satellite scheduler."
 authors = [
-    { name = "Joe Reed" }
+    { name = "Joe Reed", email = "greyskyy@gmail.com"}
 ]
 requires-python = ">=3.10"
 dynamic = [
     "version"
 ]
-license = { text = "MIT" }
-readme = "README.md"
+license = { file = "LICENSE" }
+readme = "readme.md"
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "Private :: Do Not Upload",
-    "License :: MIT",
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "astropy",
+    "isodate",
+    "geopandas",
+    "numpy",
+    "orekit >= 11.2",
+    "pyyaml",
+    "shapely",
+    "czml3",
+    "py-rebar",
+    "orekit-factory"
 ]
 
+[project.urls]
+homepage = "https://github.com/greyskyy/sat-scheduler"
+repository = "https://github.com/greyskyy/sat-scheduler"
+
 [tool.setuptools.packages.find]
-where = ["src"]  # list of folders that contain the packages (["."] by default)
-include = ["*"]  # package names should match these glob patterns (["*"] by default)
+where = ["src"]
+include = ["*"]
 exclude = ["*.tests*"]
 
-#[tool.setuptools.package-data]
-#example_pyapp = ["logging.yaml"]
+[tool.setuptools_scm]
+local_scheme = "node-and-timestamp"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra --junitxml=.build/test_output.xml --cov=satscheduler --cov-fail-under=80 --cov-report term --cov-report html:.build/test_cov_html --cov-report xml:.build/test-cov.xml"
+addopts = "-ra --junitxml=.build/test_output.xml --cov=satscheduler --cov-config=.coveragerc --cov-report term --cov-report html --cov-report xml"
 pythonpath = [
   "src"
 ]
-#testpaths = [
-#    "tests",
-#    "integration",
-#]
+filterwarnings = [
+    "ignore::DeprecationWarning"
+]
+
+[tool.black]
+line-length = 118
+
+[project.scripts]
+sat-scheduler = "pyrebar.__main__:run_main"
+
+[project.entry-points."pyrebar.preinit"]
+satsched-init = "satscheduler.initialize:pre_init"
+satsched-addargs = "satscheduler.configuration:add_args"
+
+[project.entry-points."pyrebar.postinit"]
+satsched-loadconfig = "satscheduler.configuration:load_config"
+
+[project.entry-points."pyrebar.app"]
+aoi-tool = "satscheduler.aoi.tool"
+preprocessor = "satscheduler.preprocessor.tool"

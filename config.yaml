@@ -1,41 +1,30 @@
 run:
   start: '2022-06-17T00:00:00Z'
   stop: '2022-06-18T00:00:00Z'
-orekit:
-  data: https://gitlab.orekit.org/orekit/orekit-data/-/archive/master/orekit-data-master.zip
+  step: PT10M
+  multithread: true
 aois:
   url: https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip
-  #url: https://datahub.io/core/geo-countries/r/countries.geojson
-  buffer: 20 km
+  buffer: "20km"
+  color: '#FF0000'
+#  filter:
+#    ADMIN: Mali
 satellites:
   sat1:
     name: landat-8
-    color: green
-    groundTrace:
-      show: true
-      weight: 1.
+    color: "#00FF00"
     filter: true
     catnr: 39084
   sat2:
     name: landsat-9
-    color: teal
-    groundTrace:
-      show: true
-      weight: 1.
+    color: "#00FFFF"
     filter: true
     tle:
       line1: 1 49260U 21088A   22166.94778099  .00000339  00000+0  85254-4 0  9992
       line2: 2 49260  98.2276 237.1831 0001142  78.2478 281.8849 14.57099002 38060
   sat3:
     name: Test-1
-    color: purple
-    groundTrace:
-      show: true
-      weight: 1.
-    mission:
-      groundTrace: true
-      sun: true
-      eclipse: false
+    color: "#800080"
     keplerian:
       epoch: '2022-06-16T17:54:00Z'
       #semi-major axis (m)
@@ -56,11 +45,12 @@ satellites:
     attitudes:
       - name: mission
         type: LofOffset
-        lof: qsw
         default: true
         tx: # transform from LOF
           x: [-1., 0., 0.] # +x_body toward nadir
           z: [0., 1., 0.]  # +z_body toward velocity
+    propagator:
+      orbitType: cartesian
     sensors:
       - id: camera
         type: camera
@@ -74,6 +64,7 @@ satellites:
           translation: [0., 0., 0.]
           z: [1, 0, 0]
           x: [0, 1, 0]
+        useNadirPointing: false
       
 earth:
   model: wgs84
@@ -81,6 +72,3 @@ earth:
   iersConventions: iers_2010
   simpleEop: false
 
-control:
-  step: PT10M
-  multithread: true
