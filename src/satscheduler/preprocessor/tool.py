@@ -11,7 +11,6 @@ import orekitfactory.factory
 import orekitfactory.initializer
 import pandas as pd
 
-from typing import Iterator
 from orekit.pyhelpers import absolutedate_to_datetime, datetime_to_absolutedate
 from orekitfactory.time import DateInterval, DateIntervalList
 
@@ -20,7 +19,7 @@ from org.orekit.time import AbsoluteDate
 from org.orekit.frames import Transform
 from java.util import List
 
-from .core import PreprocessingResult, PreprocessedAoi
+from .core import PreprocessingResult, PreprocessedAoi, aois_from_results
 from .runner import create_uows, run_units_of_work
 
 from ..aoi.tool import aoi_to_czml
@@ -116,7 +115,7 @@ def populate_dataframes(
 
     aidx = 0
     pidx = 0
-    for a in iterate_results(results):
+    for a in aois_from_results(results):
         aoi_df.loc[pidx] = [
             a.aoi.id,
             a.sat.id,
@@ -143,19 +142,6 @@ def populate_dataframes(
         paoi_df["duration_secs"] = paoi_df["duration"].dt.total_seconds()
 
     return aoi_df, paoi_df
-
-
-def iterate_results(results: list[PreprocessingResult]) -> Iterator[PreprocessedAoi]:
-    """Iterate over the preprocessed aois in the provided result sequence.
-
-    Args:
-        results (Sequence[PreprocessingResult]): The iterable preprocessing results
-
-    Yields:
-        Iterator[PreprocessedAoi]: An iterator over all pre-processed AOIs in the result list.
-    """
-    for r in results:
-        yield from r.aois
 
 
 def execute(args=None) -> int:
@@ -202,7 +188,7 @@ def execute(args=None) -> int:
                 czml3.Preamble(
                     name="Aois",
                 ),
-                *[aoi_to_czml(aoi.aoi, config=config.aois) for aoi in iterate_results(results)],
+                *[aoi_to_czml(aoi.aoi, config=config.aois) for aoi in aois_from_results(results)],
             ]
         )
 

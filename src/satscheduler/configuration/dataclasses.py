@@ -1,14 +1,37 @@
 """Configuration data classes."""
 import astropy.coordinates
 import astropy.units as u
+import collections.abc
 import datetime as dt
 import dacite
 from dataclasses import dataclass, field, asdict
 import enum
 import isodate
+import shapely.geometry
 from typing import Any, Dict, List, Optional
 
 from .units import Frequency, Mass, Area
+
+
+class CaseInsensitiveDict(collections.abc.Mapping):
+    def __init__(self, d):
+        self._d = d
+        self._s = dict((k.lower(), k) for k in d)
+
+    def __contains__(self, k):
+        return k.lower() in self._s
+
+    def __len__(self):
+        return len(self._s)
+
+    def __iter__(self):
+        return iter(self._s)
+
+    def __getitem__(self, k):
+        return self._d[self._s[k.lower()]]
+
+    def actual_key_case(self, k):
+        return self._s.get(k.lower())
 
 
 class LOFTypeData(enum.Enum):
@@ -140,6 +163,18 @@ class RunData(IntervalData):
 
 
 @dataclass(frozen=True, kw_only=True)
+class PriorityData:
+    """Configuration data for aoi priority."""
+
+    default: int = 1
+    """Default priority value, if no other base values are found."""
+    continent: CaseInsensitiveDict = None
+    """Priority values by continent.  This overrides the base value, but not the country value."""
+    country: CaseInsensitiveDict = None
+    """Priority values by country name. If a country value is specified, that's the base base value."""
+
+
+@dataclass(frozen=True, kw_only=True)
 class AoiConfiguration(DisplayOptions, Dictable):
     """Data class for AOI loading."""
 
@@ -154,6 +189,8 @@ class AoiConfiguration(DisplayOptions, Dictable):
     """Dictionary of filters to apply when loading the AOIs."""
     bbox: Optional[List] = None
     """Bounding box to use when loading AOI data. In [lon_min,lat_min,lon_max, lat_max]."""
+    priority: Optional[PriorityData] = PriorityData()
+    """Definitions of aoi priority."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -398,6 +435,42 @@ class EarthData(Dictable):
 
 
 @dataclass(frozen=True, kw_only=True)
+class RegionScoreData:
+    """Data defining a score multiplier by geographic region."""
+
+    region: List[float] | shapely.geometry.Polygon
+    """The region, defined as several lon/lat points [lon1,lat1,lon2,lat2,...] suitable for shapely polygon construction."""
+    multiplier: float
+    """The score multiplier."""
+    contains: bool = False
+    """Flag indicating whether the region applies to full-contained AOIs (True) or overlapping AOIs (False)."""
+
+    def __post_init__(self):
+        """Post-initialize the object, converting the region into a polygon."""
+        p = shapely.geometry.asPolygon(shell=self.region)
+        object.__setattr__(self, "region", p)
+
+
+@dataclass(frozen=True, kw_only=True)
+class StandardScoreData:
+    """Score equation data for the standard score equation.
+
+    The standard score equation is defined as: pri^priority_exp * country * continent * region.
+
+    The multipliers are multiplicative. So multiple factors can be applied to any single aoi.
+    """
+
+    priority_exp: Optional[float] = 1
+    """Exponent for priority."""
+    country: Optional[CaseInsensitiveDict] = None
+    """Score multipliers by country."""
+    continent: Optional[CaseInsensitiveDict] = None
+    """Score multipliers by continent."""
+    regions: Optional[List[RegionScoreData]] = None
+    """List of score multipliers by region."""
+
+
+@dataclass(frozen=True, kw_only=True)
 class Configuration:
     """Application configuration."""
 
@@ -411,6 +484,8 @@ class Configuration:
     """Earth model."""
     propagator: Optional[PropagatorConfiguration]
     """Defaults for satellite propagator construction."""
+    score: Optional[StandardScoreData]
+    """Configuration for the standard score equation."""
     extensions: Optional[Dict]
     """Details for any extensions."""
 
@@ -454,6 +529,6 @@ DACITE_CONFIG = dacite.Config(
         astropy.coordinates.Distance: _to_distance,
         astropy.coordinates.Angle: _to_angle,
     },
-    cast=[LOFTypeData, Mass, Frequency, OrbitTypeData],
+    cast=[LOFTypeData, Mass, Frequency, OrbitTypeData, CaseInsensitiveDict],
     strict=True,
 )

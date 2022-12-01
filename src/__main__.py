@@ -59,5 +59,13 @@ if __name__ == "__main__":
         )
     )
 
+    pyrebar.Plugins.add_entrypoint(
+        EntryPoint(
+            name="pushboom",
+            value="satscheduler.scheduler.pushbroom",
+            group=pyrebar.Plugins.APP_GROUP,
+        )
+    )
+
     rc = pyrebar.application.main()
     sys.exit(rc)

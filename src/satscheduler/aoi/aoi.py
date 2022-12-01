@@ -1,5 +1,6 @@
 """Utilities to load and manage AOIs."""
 import astropy.units as u
+import dataclasses
 import geopandas as gpd
 import logging
 import numpy as np
@@ -18,95 +19,48 @@ from org.hipparchus.util import FastMath
 from org.orekit.models.earth.tessellation import EllipsoidTessellator
 from org.orekit.bodies import GeodeticPoint
 
-from ..configuration import AoiConfiguration
+from ..configuration import AoiConfiguration, PriorityData
 
 
 warnings.filterwarnings("ignore", category=shapely.errors.ShapelyDeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class Aoi:
     """An Area of Interest to be collected by the scheduler.
 
     This object holds the region, as well as any necessary metadata regarding the region.
     """
 
-    def __init__(
-        self,
-        id: str,
-        polygon: shapely.geometry.Polygon,
-        crs=None,
-        continent: str = None,
-        country: str = None,
-        alpha2: str = None,
-        alpha3: str = None,
-        area: float = 0,
-    ):
-        """Class construtor.
+    id: str
+    """The unique id of this area."""
+    polygon: shapely.geometry.Polygon
+    """The geographic region, as a shapely Polygon."""
+    crs: str | pyproj.CRS = None
+    """The CRS in which the polygon is defined."""
+    continent: str = None
+    """Continent on which this aoi is defined."""
+    country: str = None
+    """Country in which this aoi is defined."""
+    alpha2: str = None
+    """The 2-digit country code for this AOI."""
+    alpha3: str = None
+    """The 3-digit country code for this AOI."""
+    priority: float = 0
+    """The AOI priority, also knows as the score base."""
+    area: float = 0
+    """The area of the AOI in square meters."""
 
-        Args:
-            id (str): The unique id of this area
-            polygon (Polygon): Area of this region, as a shapely Polygon
-            crs (_type_, optional): The CRS in which the polygon is defined. Defaults to None.
-            continent (str, optional): Continent on which this aoi is defined. Defaults to None.
-            country (str, optional): Country in which this aoi is defined. Defaults to None.
-            alpha2 (str, optional): The 2-digit country code for this AOI. Defaults to None.
-            alpha3 (str, optional): The 3-digit country code for this AOI. Defaults to None.
-            area (float, optional): The area of the AOI in square meters. Defaults to 0.
-        """
-        self.__id = id
-        self.__polygon = polygon
-        self.__alpha2 = alpha2
-        self.__alpha3 = alpha3
-        self.__country = country
-        self.__continent = continent
-        self.__crs = crs
-        self.__area = area
-
-    @property
-    def id(self) -> str:
-        """The AOI id."""
-        return self.__id
-
-    @property
-    def polygon(self) -> shapely.geometry.Polygon:
-        """The region of this AOI."""
-        return self.__polygon
+    def __post_init__(self, *args, **kwargs):
+        """Coerce the geometry to a counter-clockwise polygon."""
+        ccw = shapely.geometry.polygon.orient(shapely.geometry.Polygon(shell=self.polygon.exterior))
+        object.__setattr__(self, "polygon", ccw)
 
     @property
     def size(self) -> int:
         """The number of points in the AOI."""
-        return len(self.__polygon.boundary.coords)
-
-    @property
-    def alpha2(self) -> str:
-        """ISO 3166 two letter country code for this AOI's country, may be None if unset."""
-        return self.__alpha2
-
-    @property
-    def alpha3(self) -> str:
-        """ISO 3166 three letter country code of this AOI's country, may be None if unset."""
-        return self.__alpha3
-
-    @property
-    def country(self) -> str:
-        """The AOI's country, may be None if unset."""
-        return self.__country
-
-    @property
-    def continent(self) -> str:
-        """The continent for this aoi, may be None if unset."""
-        return self.__continent
-
-    @property
-    def crs(self):
-        """The CRS in which the polygon is defined; may be None, if unspecified in the constructor."""
-        return self.__crs
-
-    @property
-    def area(self) -> float:
-        """The area of this aoi, in square meters."""
-        return self.__area
+        return len(self.polygon.boundary.coords)
 
     def to_gdf(self) -> gpd.GeoDataFrame:
         """Create a GeoDataFrame from this AOI.
@@ -121,6 +75,7 @@ class Aoi:
                 "ISO_A3": [self.alpha3],
                 "continent": [self.continent],
                 "ADMIN": [self.country],
+                "priority": [self.priority],
                 "geometry": [self.polygon],
             },
             crs=self.crs,
@@ -196,44 +151,22 @@ def _toZone(polygon: shapely.geometry.Polygon) -> SphericalPolygonsSet:
     return EllipsoidTessellator.buildSimpleZone(float(1.0e-10), points)
 
 
-def _buildAoi(
-    geometry,
-    id: str,
-    alpha3: str = None,
-    alpha2: str = None,
+def _compute_priority(
+    polygon: shapely.geometry.Polygon,
+    crs=None,
     continent: str = None,
     country: str = None,
-    crs: pyproj.CRS = None,
-    area: float = 0,
-) -> Aoi:
-    """Build an AOI from the provided geometry.
+    config: PriorityData = None,
+) -> float:
+    if config is None:
+        config = PriorityData()
 
-    Args:
-        geometry (GeoSeries|Polygon|MultiPolygon): The aoi polygon.
-        id (str): The unique id of the aoi.
-        alpha3 (str, optional): The ISO_A3 country code for this aoi. Defaults to None.
-        alpha2 (str, optional): The ISO_A2 country code for this aoi. Defaults to None.
-        continent (str, optional): The continent of this aoi. Defaults to None.
-        country (str, optional): The country name for this aoi. Defaults to None.
-
-    Raises:
-        ValueError: When an invalid geometry type is provided.
-
-    Yields:
-        Generator[Aoi]: A generator enumerating all the AOIs built from this geometry
-    """
-    ccw = shapely.geometry.polygon.orient(shapely.geometry.Polygon(shell=geometry.exterior))
-
-    return Aoi(
-        id.replace(" ", "_"),
-        polygon=ccw,
-        alpha2=alpha2,
-        alpha3=alpha3,
-        country=country,
-        continent=continent,
-        crs=crs,
-        area=area,
-    )
+    if config.country and country and country in config.country:
+        return config.country[country]
+    elif config.continent and continent in config.continent:
+        return config.continent[continent]
+    else:
+        return config.default
 
 
 def load_aois(
@@ -242,7 +175,7 @@ def load_aois(
     bbox: tuple[float, float, float, float] = None,
     buffer: u.Quantity[u.m] | float | str = 20000 * u.m,
     filter: dict = None,
-    **kwargs
+    **kwargs,
 ) -> list[Aoi]:
     """Load the AOIs from the source as a list of Aoi objects.
 
@@ -336,15 +269,18 @@ def load_aois(
         a = row["area"]
 
         aois.append(
-            _buildAoi(
-                geometry,
-                continent.replace(" ", "_") + str(index),
+            Aoi(
+                id=f"country{index}",
+                polygon=geometry,
                 country=country,
                 alpha2=alpha2,
                 alpha3=alpha3,
                 continent=continent,
                 crs=crs,
                 area=a,
+                priority=_compute_priority(
+                    polygon=geometry, crs=crs, continent=continent, country=country, config=config.priority
+                ),
             )
         )
 

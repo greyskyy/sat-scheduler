@@ -9,6 +9,11 @@ aois:
   color: '#FF0000'
 #  filter:
 #    ADMIN: Mali
+  priority:
+    default: 1
+    continent:
+      asia: 2
+      "north america": 4
 satellites:
   sat1:
     name: landat-8
@@ -65,10 +70,9 @@ satellites:
           z: [1, 0, 0]
           x: [0, 1, 0]
         useNadirPointing: false
-      
+
 earth:
   model: wgs84
   frameName: itrf
   iersConventions: iers_2010
   simpleEop: false
-

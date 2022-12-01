@@ -80,3 +80,4 @@ satsched-loadconfig = "satscheduler.configuration:load_config"
 [project.entry-points."pyrebar.app"]
 aoi-tool = "satscheduler.aoi.tool"
 preprocessor = "satscheduler.preprocessor.tool"
+pushbroom = "satscheduler.scheduler.pushbroom"

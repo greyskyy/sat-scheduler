@@ -89,7 +89,7 @@ def execute(args=None):
     logger = logging.getLogger(__name__)
     config = get_config()
 
-    aois = load_aois(**config.aois.as_dict())
+    aois = load_aois(config.aois)
     logger.info("loaded %d aois", len(aois))
 
     zones = [aoi.createZone() for aoi in aois]
@@ -288,17 +288,10 @@ def _create_aoi_czml(args, config, aois, logger):
 
 
 def _create_aoi_csv(args, aois, logger):
-    aoi_df = pd.DataFrame(columns=["aoi_id", "country", "continent", "area", "alpha2", "alpha3"])
+    aoi_df = pd.DataFrame(columns=["aoi_id", "country", "continent", "area", "alpha2", "alpha3", "priority"])
     idx = 0
     for aoi in aois:
-        aoi_df.loc[idx] = [
-            aoi.id,
-            aoi.country,
-            aoi.continent,
-            aoi.area,
-            aoi.alpha2,
-            aoi.alpha3,
-        ]
+        aoi_df.loc[idx] = [aoi.id, aoi.country, aoi.continent, aoi.area, aoi.alpha2, aoi.alpha3, aoi.priority]
         idx += 1
 
     aoi_df.to_csv(args.csv)

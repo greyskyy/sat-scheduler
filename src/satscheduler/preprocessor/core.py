@@ -44,3 +44,16 @@ class UnitOfWork:
     step: dt.timedelta = dt.timedelta(minutes=10)
     test_mode: bool = False
     sensor_ids: list[str] = dataclasses.field(default_factory=list)
+
+
+def aois_from_results(results: typing.Sequence[PreprocessingResult]) -> typing.Iterable[PreprocessedAoi]:
+    """Iterate over the preprocessed aois in the provided result sequence.
+
+    Args:
+        results (Sequence[PreprocessingResult]): The iterable preprocessing results
+
+    Yields:
+        Iterator[PreprocessedAoi]: An iterator over all pre-processed AOIs in the result list.
+    """
+    for r in results:
+        yield from r.aois
