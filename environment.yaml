@@ -25,3 +25,4 @@ dependencies:
   - pip:
     - py-rebar
     - orekit-factory
+    - ortools

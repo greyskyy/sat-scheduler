@@ -471,6 +471,14 @@ class StandardScoreData:
 
 
 @dataclass(frozen=True, kw_only=True)
+class OptimizerConfiguration:
+    """Dataclass for configuring the optimizer."""
+
+    solver: Optional[str] = "GLOP"
+    """The solver type to use."""
+
+
+@dataclass(frozen=True, kw_only=True)
 class Configuration:
     """Application configuration."""
 
@@ -486,6 +494,8 @@ class Configuration:
     """Defaults for satellite propagator construction."""
     score: Optional[StandardScoreData]
     """Configuration for the standard score equation."""
+    optimizer: Optional[OptimizerConfiguration]
+    """Optimizer configuration."""
     extensions: Optional[Dict]
     """Details for any extensions."""
 

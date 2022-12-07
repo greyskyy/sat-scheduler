@@ -76,3 +76,6 @@ earth:
   frameName: itrf
   iersConventions: iers_2010
   simpleEop: false
+
+optimizer:
+  solver: GLOP

@@ -81,17 +81,3 @@ class Platforms(typing.Mapping):
     def __len__(self) -> int:
         """Number of platforms in this collection."""
         return self.__data.__len__()
-
-
-def process_results(results: typing.Sequence[PreprocessingResult]) -> tuple[Platforms, tuple[PreprocessedAoi]]:
-    platforms = Platforms([Platform(model=r.sat, ephemeris=r.ephemeris) for r in results])
-
-    filtered = []
-    aois = []
-    for aoi in aois_from_results(results):
-        if len(aoi.intervals) == 0:
-            filtered.append(aoi)
-        else:
-            aois.append(aoi)
-
-    return platforms, aois, filtered
