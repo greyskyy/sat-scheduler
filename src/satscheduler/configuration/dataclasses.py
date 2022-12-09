@@ -14,23 +14,64 @@ from .units import Frequency, Mass, Area
 
 
 class CaseInsensitiveDict(collections.abc.Mapping):
+    """A `dict` wrapper where the keys are case-insensitive strings."""
+
     def __init__(self, d):
+        """Class constructor.
+
+        Args:
+            d (dict): The base dictionary.
+        """
         self._d = d
         self._s = dict((k.lower(), k) for k in d)
 
     def __contains__(self, k):
+        """Check if the key is contained.
+
+        Args:
+            k (str): The key.
+
+        Returns:
+            bool: `True` if the key is contained, `False` otherwise.
+        """
         return k.lower() in self._s
 
     def __len__(self):
+        """The number of pairs in this dictionary.
+
+        Returns:
+            int: The number of pairs in this dictionary.
+        """
         return len(self._s)
 
     def __iter__(self):
+        """Produce a interator for this dictionary.
+
+        Returns:
+            typing.Iterator: Iterate over this dictionary.
+        """
         return iter(self._s)
 
     def __getitem__(self, k):
+        """Get the item.
+
+        Args:
+            k (str): The key.
+
+        Returns:
+            typing.Any: The value.
+        """
         return self._d[self._s[k.lower()]]
 
     def actual_key_case(self, k):
+        """Get the original key.
+
+        Args:
+            k (str): The case-insensitive key.
+
+        Returns:
+            str: The original, case-sensitive key.
+        """
         return self._s.get(k.lower())
 
 
@@ -439,7 +480,8 @@ class RegionScoreData:
     """Data defining a score multiplier by geographic region."""
 
     region: List[float] | shapely.geometry.Polygon
-    """The region, defined as several lon/lat points [lon1,lat1,lon2,lat2,...] suitable for shapely polygon construction."""
+    """The region, defined as several lon/lat points [lon1,lat1,lon2,lat2,...] suitable for shapely polygon
+    construction."""
     multiplier: float
     """The score multiplier."""
     contains: bool = False

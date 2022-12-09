@@ -7,8 +7,8 @@ aois:
   url: https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip
   buffer: "20km"
   color: '#FF0000'
-#  filter:
-#    ADMIN: Mali
+  #filter:
+  #  CONTINENT: "North America"
   priority:
     default: 1
     continent:
@@ -79,3 +79,4 @@ earth:
 
 optimizer:
   solver: GLOP
+

@@ -11,6 +11,28 @@ ScoredAoi = collections.namedtuple("ScoredAoi", field_names=("score", "aoi"))
 """Tuple of aoi and score."""
 
 
+def score_and_sort_aois(
+    aois: typing.Sequence[Aoi | PreprocessedAoi], score_func: typing.Callable[[Aoi | PreprocessedAoi], float] = None
+) -> list[ScoredAoi]:
+    """Compute the score for the set of AOIs, then sort them in descending score order.
+
+    Args:
+        aois (typing.Sequence[Aoi  |  PreprocessedAoi]): The list of aois
+        score_func (typing.Callable[[Aoi  |  PreprocessedAoi], float], optional): The score function.. Defaults to None.
+
+    Returns:
+        list[ScoredAoi]: The ordered list of scored aois.
+    """
+    scored_aois: list[ScoredAoi] = []
+    for value in score_aois(aois, score_func=score_func):
+        if value.score > 0:
+            scored_aois.append(value)
+
+    scored_aois.sort(key=lambda x: (-x.score, x.aoi.aoi.id if isinstance(x.aoi, PreprocessedAoi) else x.aoi.id))
+
+    return scored_aois
+
+
 def score_aois(
     aois: typing.Sequence[Aoi | PreprocessedAoi],
     score_func: typing.Callable[[Aoi | PreprocessedAoi], float] = None,
@@ -23,7 +45,8 @@ def score_aois(
 
     Args:
         aois (typing.Sequence[Aoi | PreprocessedAoi]): The sequence of AOIs to score.
-        score_func (typing.Callable[[Aoi | PreprocessedAoi], int], optional): The function which computes the score. Defaults to None.
+        score_func (typing.Callable[[Aoi | PreprocessedAoi], int], optional): The function which computes
+        the score. Defaults to None.
 
     Yields:
         Iterator[typing.Iterable[ScoredAoi]]: The scored aoi.
@@ -62,8 +85,6 @@ def standard_score(aoi: Aoi, config: StandardScoreData) -> float:
             elif (not r.contains) and r.region.overlaps(aoi.polygon):
                 region_factor *= r.multiplier
 
-    print(f"({aoi.priority}**{config.priority_exp}) * {country_factor} * {continent_factor} * {region_factor}")
-
     return (aoi.priority**config.priority_exp) * country_factor * continent_factor * region_factor
 
 
@@ -82,7 +103,7 @@ def construct_standard_score_func(
         config = get_config().score or StandardScoreData()
 
     def score_func(aoi: Aoi | PreprocessedAoi) -> float:
-        if isinstance(PreprocessedAoi, Aoi):
+        if isinstance(aoi, PreprocessedAoi):
             return standard_score(aoi.aoi, config)
         elif isinstance(aoi, Aoi):
             return standard_score(aoi, config)

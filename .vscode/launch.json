@@ -31,6 +31,15 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": ["preprocess", "--test"]
+        },
+        {
+            "name": "Python: pushbroom",
+            "type": "python",
+            "request": "launch",
+            "program": "src/",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": ["pushbroom"]
         }
     ]
 }

@@ -270,7 +270,7 @@ def load_aois(
 
         aois.append(
             Aoi(
-                id=f"country{index}",
+                id=f"aoi{index}",
                 polygon=geometry,
                 country=country,
                 alpha2=alpha2,
