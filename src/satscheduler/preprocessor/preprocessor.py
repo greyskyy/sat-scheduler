@@ -15,7 +15,7 @@ from org.orekit.propagation.events import (
 from org.orekit.propagation.events.handlers import PythonEventHandler
 
 from ..aoi import Aoi
-from ..models import CameraSensorModel, SatelliteModel, SensorModel
+from ..models import CameraSensorModel, SatelliteModel, SensorModel, Platform
 from ..utils import EphemerisGenerator
 
 from .core import PreprocessedAoi, PreprocessingResult, UnitOfWork
@@ -214,8 +214,7 @@ def preprocess(uow: UnitOfWork) -> PreprocessingResult:
 
     _get_logger().info("Completed work for %s", uow.sat.id)
     return PreprocessingResult(
-        ephemeris=generator.build(atProv=uow.sat.getAttitudeProvider("mission")),
-        sat=uow.sat,
+        platform=Platform(ephemeris=generator.build(atProv=uow.sat.getAttitudeProvider("mission")), model=uow.sat),
         aois=tuple(h.result() for h in handlers),
         interval=uow.interval,
     )

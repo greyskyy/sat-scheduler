@@ -9,7 +9,7 @@ from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.propagation import BoundedPropagator
 
 from ..aoi import Aoi
-from ..models import SatelliteModel, CameraSensorModel
+from ..models import SatelliteModel, CameraSensorModel, Platform
 
 
 @dataclasses.dataclass(frozen=True)
@@ -26,10 +26,17 @@ class PreprocessedAoi:
 class PreprocessingResult:
     """Result of preprocessing a single satellite/sensor pair."""
 
-    sat: SatelliteModel
-    ephemeris: BoundedPropagator
+    platform: Platform
     aois: tuple[PreprocessedAoi]
     interval: orekitfactory.time.DateInterval
+
+    @property
+    def sat(self) -> SatelliteModel:
+        return self.platform.model
+
+    @property
+    def ephemeris(self) -> BoundedPropagator:
+        return self.platform.ephemeris
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

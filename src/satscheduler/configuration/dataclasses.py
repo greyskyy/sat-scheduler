@@ -161,18 +161,19 @@ class DisplayOptions:
     show: Optional[bool] = True
     """Flag indicating whether to display or not-display the object."""
 
-    def maybe_get(self, attr: str):
+    def maybe_get(self, attr: str, default_value=None):
         """Attempt to retreive an attribute value.
 
         Args:
             attr (str): The attribute name
+            default_value (Any, optional): The default value to use when the attibute is not found or not set.
 
         Returns:
-            Any|None: The attribute value, or `None` if the attribute is not found.
+            Any|None: The attribute value, or `None` if the attribute is not found and no default is provided.
         """
         if hasattr(self, attr):
-            return getattr(self, attr)
-        return None
+            return getattr(self, attr) or default_value
+        return default_value
 
 
 class Dictable:

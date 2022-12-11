@@ -12,7 +12,7 @@ import math
 import orekitfactory.time
 import typing
 
-from .core import Platform, Platforms, filter_aois_no_access, SatPayloadId
+from .core import filter_aois_no_access
 from .reporting import init_access_report, record_result, Result, record_score_and_order, record_bonusing
 from .schedule import Schedule, ScheduleActivity, ScheduleEncoder
 from .scheduler import add_aois_to_solvers, solve
@@ -24,6 +24,7 @@ from .solver import (
     result_is_successful,
 )
 from ..configuration import get_config, Configuration
+from ..models import Platform, Platforms, SatPayloadId
 from ..preprocessor import create_uows, run_units_of_work, PreprocessingResult, PreprocessedAoi, aois_from_results
 from ..utils import positive_int, DefaultFactoryDict
 
@@ -121,7 +122,7 @@ def execute(args=None) -> int:
 
     # process results into scheduler data structures
     logger.info("Initializing reports.")
-    platforms = Platforms([Platform(model=r.sat, ephemeris=r.ephemeris) for r in results])
+    platforms = Platforms([r.platform for r in results])
     report = init_access_report(aois_from_results(results))
 
     # sort the aois into priority order

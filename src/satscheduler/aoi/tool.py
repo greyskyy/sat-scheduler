@@ -13,7 +13,9 @@ import os.path
 from org.hipparchus.geometry.spherical.twod import Vertex
 
 from .aoi import Aoi, load_aois
+from .czml import aoi_czml
 from ..configuration import get_config, AoiConfiguration
+from ..utils.czml import write_czml
 
 SUBCOMMAND = "list-aois"
 ALIASES = ["aois", "la"]
@@ -114,95 +116,6 @@ def execute(args=None):
     return 0
 
 
-def aoi_to_czml(aoi: Aoi, config: AoiConfiguration, zones: bool = False) -> czml3.Packet:
-    """Generate a czml packet for the provided aoi.
-
-    Args:
-        aoi (Aoi): The aoi
-        zones (bool, optional): Flag indicating whether to use the aoi boundary (False) or the schedulable zone
-        (True). Defaults to False.
-        config (dict, optional): Configuration dictionary. Defaults to {}.
-
-    Returns:
-        czml3.Packet: The CZML packet
-    """
-
-    def defaults(k: str, v):
-        if hasattr(config, k):
-            if (value := getattr(config, k)) is not None:
-                return value
-        return v
-
-    label = czml3.properties.Label(
-        horizontalOrigin=czml3.enums.HorizontalOrigins.CENTER,
-        show=defaults("labels", True),
-        font=defaults("font", "11pt Lucida Console"),
-        style=czml3.enums.LabelStyles.FILL_AND_OUTLINE,
-        outlineWidth=2,
-        text=f"{aoi.country} ({aoi.id})",
-        verticalOrigin=czml3.enums.VerticalOrigins.BASELINE,
-        fillColor=czml3.properties.Color.from_str(defaults("color", "#FF0000")),
-    )
-
-    if zones:
-        zone = aoi.createZone()
-        initialVert: Vertex = zone.getBoundaryLoops().get(0)
-        nextVert: Vertex = initialVert.getOutgoing().getEnd()
-
-        s2_points = [initialVert.getLocation()]
-
-        while initialVert.getLocation().distance(nextVert.getLocation()) > 1e-10:
-            s2_points.append(nextVert.getLocation())
-            nextVert = nextVert.getOutgoing().getEnd()
-
-        coords = []
-        for p in s2_points:
-            lat = 0.5 * math.pi - p.getPhi()
-            lon = p.getTheta()
-
-            coords.extend([lon, lat, 100])
-
-        positions = czml3.properties.PositionList(cartographicRadians=coords)
-
-    else:
-        coords = []
-        for c in aoi.polygon.boundary.coords:
-            if math.isfinite(c[0]) and math.isfinite(c[1]):
-                coords.extend(c)
-                coords.append(100)  # 0m elevation
-
-        positions = czml3.properties.PositionList(cartographicDegrees=coords)
-
-    if aoi.polygon.centroid.bounds:
-        position = czml3.properties.Position(
-            cartographicDegrees=[
-                aoi.polygon.centroid.coords[0][0],
-                aoi.polygon.centroid.coords[0][1],
-                1000,
-            ]
-        )
-    else:
-        position = None
-
-    return czml3.Packet(
-        id=f"aoi/{aoi.id}",
-        name=aoi.id,
-        label=label,
-        polyline=czml3.properties.Polyline(
-            positions=positions,
-            material=czml3.properties.Material(
-                polylineOutline=czml3.properties.PolylineOutlineMaterial(
-                    color=label.fillColor, outlineColor=label.fillColor, outlineWidth=3
-                ),
-            ),
-            arcType=czml3.enums.ArcTypes.GEODESIC,
-            clampToGround=True,
-            zIndex=10,
-        ),
-        position=position,
-    )
-
-
 def _write_aoi_border(aoi: Aoi, prefix: str = None, write_zone: bool = True):
     """Write the AOI border to a csv file.
 
@@ -258,27 +171,8 @@ def _create_aoi_czml(args, config, aois, logger):
         fname2 = f"{fname}_zones.czml"
         fname = f"{fname}.czml"
 
-    doc = czml3.Document(
-        [
-            czml3.Preamble(
-                name="Aois",
-            ),
-            *[aoi_to_czml(aoi, config=config) for aoi in aois],
-        ]
-    )
-    with open(fname, "w") as f:
-        doc.dump(f)
-
-    doc = czml3.Document(
-        [
-            czml3.Preamble(
-                name="Aoi Zones",
-            ),
-            *[aoi_to_czml(aoi, config=config, zones=True) for aoi in aois],
-        ]
-    )
-    with open(fname2, "w") as f:
-        doc.dump(f)
+    write_czml(fname=fname, name="Aois", packets=[aoi_czml(aoi, config=config) for aoi in aois])
+    write_czml(fname=fname2, name="Aoi Zones", packets=[aoi_czml(aoi, config=config, zones=True) for aoi in aois])
 
     logger.info(
         "AOI boundaries written to %s and scheduling boundaries written to %s",

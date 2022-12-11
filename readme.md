@@ -1,13 +1,28 @@
 # Satellite coverage
 
+This repository is still under construction and should be considered in an *alpha* state.
+
+TODO remaining before MVP:
+* [] generate payload activity schedules as CSVs and json
+* [] generate czml output for each schedule
+* [] compute orbit rev boundaries and evaluate duty-cycle per rev, rather than total interval
+* [] add sun-elevation constraint at payload boresight point (nadir point for pushbroom)
+* [] finish comments and resolve all flake8 errors
+
+Additional, non-MVP remaining tasks:
+* [] generate coverage report in CZML and in csv
+* [] adjust score to prefer non-covered areas, penalizing repeating coverage
+
 ## tl;dr
 
 Build and activate the conda environment from the `environment.yaml`
 
 ```bash
-mamba env create -f environment.yaml --name sat-scheduler
+mamba env create -f environment.yaml
 mamba activate sat-scheduler
-python src/satscheduler
+python src --help
+
+python src [tool] --help
 ```
 
 ## Tools
@@ -30,6 +45,26 @@ To view the czml output, simply navigate a browser to a [czml viewer](https://ce
 czml output file into the display. The viewer will automatically load and and display the file.
 
 ### preprocess
+
+Preprocess the AOIs, propagating ephemeris, and compute time intervals when each AOI is within each sensor's FOV footprint.
+
+This tool performs the following steps:
+
+1. steps 1-3 from [list-aois](#list-aois), above.
+2. propagate ephemeris, computing payload field-of-view intervals for each aoi.
+3. generate output csvs and czml files
+
+### pushbroom
+
+Schedule payload activities for each AOI, according to payload constraints and priority, generating a payload schedule for each payload. This scheduler assumes a fixed-attitude (nadir-pointing) payload that doesn't articulate.
+
+This tool performs the following steps
+
+1. load aois as in steps from [list-aois](#list-aois), above
+2. compute in-view intervals, as described in step 2 from [preprocess](#preprocess) above
+3. score each AOI, according to aoi priority and the score equation
+4. generate a schedule for each aoi
+5. generate output csvs, reports, and czml files
 
 ## Configuration
 

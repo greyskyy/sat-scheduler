@@ -22,8 +22,10 @@ from java.util import List
 from .core import PreprocessingResult, PreprocessedAoi, aois_from_results
 from .runner import create_uows, run_units_of_work
 
-from ..aoi.tool import aoi_to_czml
+from ..aoi.czml import aoi_czml
 from ..configuration import get_config, Configuration, AoiConfiguration
+from ..models.czml import platform_czml
+from ..utils.czml import write_czml
 
 # patch cml3
 czml3.types.TYPE_MAPPING[int] = "number"
@@ -183,17 +185,11 @@ def execute(args=None) -> int:
 
     # Write the aoi czml
     if args.aoi_czml:
-        aoi_czml = czml3.Document(
-            [
-                czml3.Preamble(
-                    name="Aois",
-                ),
-                *[aoi_to_czml(aoi.aoi, config=config.aois) for aoi in aois_from_results(results)],
-            ]
+        write_czml(
+            fname="{args.prefix}_aois.czml",
+            name="Aois",
+            packets=[aoi_czml(aoi.aoi, config=config.aois) for aoi in aois_from_results(results)],
         )
-
-        with open(f"{args.prefix}_aois.czml", "w") as f:
-            aoi_czml.dump(f)
 
     # Write the access csv
     if args.paoi_csv:
@@ -201,39 +197,30 @@ def execute(args=None) -> int:
 
     # Write the satellite processing czml
     for r in results:
-        sat_packet, sat_start, sat_stop = generate_satellite_czml(r, config)
+        sensor_packets = generate_sensor_czml(r, config)
 
-        total_interval = DateIntervalList(
-            interval=DateInterval(datetime_to_absolutedate(sat_start), datetime_to_absolutedate(sat_stop))
-        )
-
-        sensor_packets = generate_sensor_czml(r, total_interval.span.start, total_interval.span.stop, config)
-
-        sat_doc = czml3.Document(
-            [
-                czml3.Preamble(
-                    name=f"{r.sat.name} preprocessing aoi results",
-                    clock=czml3.types.IntervalValue(
-                        start=sat_start,
-                        end=sat_stop,
-                        value=czml3.properties.Clock(currentTime=sat_start, multiplier=10),
-                    ),
-                ),
-                sat_packet,
-                *[generate_paoi_czml(aoi, total_interval, config.aois) for aoi in r.aois],
+        write_czml(
+            fname=f"{args.prefix}_sat_{r.sat.id}.czml",
+            name=f"{r.sat.name} preprocessing aoi results",
+            clock=czml3.types.IntervalValue(
+                start=config.run.start,
+                end=config.run.stop,
+                value=czml3.properties.Clock(currentTime=config.run.start, multiplier=10),
+            ),
+            packets=[
+                platform_czml(r.platform),
+                *[
+                    aoi_czml(aoi.aoi, config=config.aois, zones=True, show=True, fill_show=aoi.intervals)
+                    for aoi in r.aois
+                ],
                 *sensor_packets,
-            ]
+            ],
         )
-
-        with open(f"{args.prefix}_sat_{r.sat.id}.czml", "w") as f:
-            sat_doc.dump(f)
 
     return 0
 
 
-def generate_sensor_czml(
-    result: PreprocessingResult, start: AbsoluteDate, stop: AbsoluteDate, config: Configuration
-) -> tuple[czml3.Packet]:
+def generate_sensor_czml(result: PreprocessingResult, config: Configuration) -> tuple[czml3.Packet]:
     """Generate a set to CZML packets for the provided sensor.
 
     Args:

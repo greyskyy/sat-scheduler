@@ -4,9 +4,12 @@ import orekitfactory.time
 import typing
 
 from ..preprocessor import PreprocessedAoi
+from ..utils import DefaultFactoryDict
 
-from .core import SatPayloadId
+from ..models import SatPayloadId, Platform
+from .schedule import Schedule
 from .reporting import Result
+
 from .score import ScoredAoi
 from .solver import (
     SolverAoi,
@@ -166,3 +169,10 @@ def solve(
         )
         record_all(report, solver_aois=solver_aois, result=Result.SOLVER_INFEASIBLE_SOLUTION)
         return result, orekitfactory.time.DateIntervalList()
+
+
+def write_schedule_czml(
+    platform: Platform, fname: str, schedule: Schedule, aois: typing.Sequence[PreprocessedAoi] = None
+):
+
+    pass
