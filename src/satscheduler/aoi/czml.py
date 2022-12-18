@@ -10,8 +10,40 @@ import typing
 from org.hipparchus.geometry.spherical.twod import Vertex
 
 from ..configuration import AoiConfiguration
+from ..utils.czml import format_boolean
 
 from .aoi import Aoi
+
+
+def _positions(aoi: Aoi) -> czml3.properties.PositionList:
+    coords = []
+    for c in aoi.polygon.boundary.coords:
+        if math.isfinite(c[0]) and math.isfinite(c[1]):
+            coords.extend(c)
+            coords.append(10)  # 10m elevation
+
+    return czml3.properties.PositionList(cartographicDegrees=coords)
+
+
+def _zone_positions(aoi: Aoi) -> czml3.properties.PositionList:
+    zone = aoi.createZone()
+    initialVert: Vertex = zone.getBoundaryLoops().get(0)
+    nextVert: Vertex = initialVert.getOutgoing().getEnd()
+
+    s2_points = [initialVert.getLocation()]
+
+    while initialVert.getLocation().distance(nextVert.getLocation()) > 1e-10:
+        s2_points.append(nextVert.getLocation())
+        nextVert = nextVert.getOutgoing().getEnd()
+
+    coords = []
+    for p in s2_points:
+        lat = 0.5 * math.pi - p.getPhi()
+        lon = p.getTheta()
+
+        coords.extend([lon, lat, 100])
+
+    return czml3.properties.PositionList(cartographicRadians=coords)
 
 
 def aoi_czml(
@@ -32,52 +64,21 @@ def aoi_czml(
     Returns:
         czml3.Packet: The CZML packet
     """
-
-    def defaults(k: str, v):
-        if hasattr(config, k):
-            if (value := getattr(config, k)) is not None:
-                return value
-        return v
-
     label = czml3.properties.Label(
         horizontalOrigin=czml3.enums.HorizontalOrigins.CENTER,
-        show=defaults("labels", True),
-        font=defaults("font", "11pt Lucida Console"),
+        show=config.maybe_get("labels", True),
+        font=config.maybe_get("font", "11pt Lucida Console"),
         style=czml3.enums.LabelStyles.FILL_AND_OUTLINE,
         outlineWidth=2,
         text=f"{aoi.country} ({aoi.id})",
         verticalOrigin=czml3.enums.VerticalOrigins.BASELINE,
-        fillColor=czml3.properties.Color.from_str(defaults("color", "#FF0000")),
+        fillColor=czml3.properties.Color.from_str(config.maybe_get("color", "#FF0000")),
     )
 
     if zones:
-        zone = aoi.createZone()
-        initialVert: Vertex = zone.getBoundaryLoops().get(0)
-        nextVert: Vertex = initialVert.getOutgoing().getEnd()
-
-        s2_points = [initialVert.getLocation()]
-
-        while initialVert.getLocation().distance(nextVert.getLocation()) > 1e-10:
-            s2_points.append(nextVert.getLocation())
-            nextVert = nextVert.getOutgoing().getEnd()
-
-        coords = []
-        for p in s2_points:
-            lat = 0.5 * math.pi - p.getPhi()
-            lon = p.getTheta()
-
-            coords.extend([lon, lat, 100])
-
-        positions = czml3.properties.PositionList(cartographicRadians=coords)
-
+        positions = _zone_positions(aoi)
     else:
-        coords = []
-        for c in aoi.polygon.boundary.coords:
-            if math.isfinite(c[0]) and math.isfinite(c[1]):
-                coords.extend(c)
-                coords.append(10)  # 10m elevation
-
-        positions = czml3.properties.PositionList(cartographicDegrees=coords)
+        positions = _positions(aoi)
 
     if aoi.polygon.centroid.bounds:
         position = czml3.properties.Position(
@@ -90,31 +91,8 @@ def aoi_czml(
     else:
         position = None
 
-    if show is None:
-        show = True
-    elif isinstance(show, bool):
-        show = show
-    else:
-        lst = orekitfactory.time.as_dateintervallist(show)
-        if len(lst) == 0:
-            show = False
-        else:
-            show = czml3.types.Sequence(
-                [czml3.types.IntervalValue(start=ivl.start_dt, end=ivl.stop_dt, value=True) for ivl in lst]
-            )
-
-    if fill_show is None:
-        fill_show = False
-    elif isinstance(fill_show, bool):
-        fill_show = fill_show
-    else:
-        lst = orekitfactory.time.as_dateintervallist(fill_show)
-        if len(lst) == 0:
-            fill_show = False
-        else:
-            fill_show = czml3.types.Sequence(
-                [czml3.types.IntervalValue(start=ivl.start_dt, end=ivl.stop_dt, value=True) for ivl in lst]
-            )
+    show = format_boolean(show)
+    fill_show = format_boolean(fill_show)
 
     if fill_show:
         polygon = czml3.properties.Polygon(

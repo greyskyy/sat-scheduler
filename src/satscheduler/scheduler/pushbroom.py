@@ -12,10 +12,9 @@ import math
 import orekitfactory.time
 import typing
 
-from .core import filter_aois_no_access
+from .core import filter_aois_no_access, Schedule, ScheduleActivity, ScheduleEncoder
 from .reporting import init_access_report, record_result, Result, record_score_and_order, record_bonusing
-from .schedule import Schedule, ScheduleActivity, ScheduleEncoder
-from .scheduler import add_aois_to_solvers, solve
+from .scheduler import add_aois_to_solvers, solve, write_schedule_czml
 from .score import score_and_sort_aois, ScoredAoi
 from .solver import (
     create_solver,
@@ -24,7 +23,7 @@ from .solver import (
     result_is_successful,
 )
 from ..configuration import get_config, Configuration
-from ..models import Platform, Platforms, SatPayloadId
+from ..models import Platforms, SatPayloadId
 from ..preprocessor import create_uows, run_units_of_work, PreprocessingResult, PreprocessedAoi, aois_from_results
 from ..utils import positive_int, DefaultFactoryDict
 
@@ -182,7 +181,14 @@ def execute(args=None) -> int:
         with open(f"pushbroom_{k.sat_id}_{k.payload_id}.json", "w") as f:
             json.dump(v, f, cls=ScheduleEncoder, indent=2)
 
-        # save schedule czml
+        write_schedule_czml(
+            platform=platforms[k.sat_id],
+            fname=f"pushbroom_{k.sat_id}_{k.payload_id}",
+            schedule=v,
+            config=config,
+            sensor=platforms[k.sat_id].model.sensor(k.payload_id),
+            aois=aois_from_results(results),
+        )
 
 
 class BatchData:

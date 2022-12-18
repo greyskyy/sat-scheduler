@@ -4,10 +4,14 @@ import czml3.base
 import czml3.enums
 import czml3.properties
 import czml3.types
+import datetime as dt
+import orekitfactory.time
 import os.path
 import typing
 
-__all__ = ["Polygon"]
+from org.orekit.time import AbsoluteDate
+
+__all__ = ["Polygon", "write_czml"]
 
 
 @czml3.core.attr.s(str=False, frozen=True, kw_only=True)
@@ -33,9 +37,11 @@ def write_czml(fname: str, packets: czml3.Packet | typing.Sequence[czml3.Packet]
     """Write the czml packets to a file.
 
     Args:
-        fname (str): The file name
-        packets (czml3.Packet | typing.Sequence[czml3.Packet]): _description_
-        name (str, optional): _description_. Defaults to None.
+        fname (str): The file name.
+        packets (czml3.Packet | typing.Sequence[czml3.Packet]): The packets to include in the document.
+        name (str, optional): The name to provide to the czml document. If None, the file basename will be used.
+        Defaults to None.
+        clock (czml3.types.IntervalValue, optional): The document clock to use. Default to None.
     """
     if not fname.endswith(".czml"):
         fname = f"{fname}.czml"
@@ -54,3 +60,52 @@ def write_czml(fname: str, packets: czml3.Packet | typing.Sequence[czml3.Packet]
     )
     with open(fname, "w") as f:
         doc.dump(f)
+
+
+def format_boolean(
+    value: bool
+    | orekitfactory.time.DateIntervalList
+    | orekitfactory.time.DateInterval
+    | typing.Sequence[AbsoluteDate | dt.datetime | typing.Sequence[AbsoluteDate | dt.datetime]],
+    span: None | orekitfactory.time.DateInterval = None,
+    add_false: bool = False,
+) -> bool | czml3.types.Sequence:
+    """Format a boolean value.
+
+    Args:
+        value (bool | orekitfactory.time.DateIntervalList | orekitfactory.time.DateInterval |
+        typing.Sequence[AbsoluteDate  |  dt.datetime  |  typing.Sequence[AbsoluteDate  |  dt.datetime]]): The value. If
+        a boolean, that value will be returned. Otherwise, the value will be coerced into a DateIntervalList, and a
+        `Sequence` will be provided set to true for each interval.
+        span (None | orekitfactory.time.DateInterval, optional): The total timespan. If specified and the `value` is
+        an interval list, intervals setting a value to `False` will be added to the resuling sequence.  Ignored if
+        `value` is a `bool`. Defaults to None.
+        add_false (bool, optional): When `True` and `value` is an interval list, add complimentary intervals to
+        specify `False`. This value is ignored when `span` is set. Defaults to `False`.
+
+    Returns:
+        bool | czml3.types.Sequence: The value to be used.
+    """
+    if value is None:
+        return True
+    elif isinstance(value, bool):
+        return value
+    else:
+        lst = orekitfactory.time.as_dateintervallist(value)
+
+        if span:
+            no_lst = orekitfactory.time.list_subtract(span, lst)
+        elif add_false:
+            no_lst = orekitfactory.time.list_compliment(lst)
+        else:
+            no_lst = []
+
+        if len(lst) == 0:
+            return False
+        else:
+            return czml3.types.Sequence(
+                [
+                    *[czml3.types.IntervalValue(start=ivl.start_dt, end=ivl.stop_dt, value=True) for ivl in lst],
+                    *[czml3.types.IntervalValue(start=ivl.start_dt, end=ivl.stop_dt, value=False) for ivl in no_lst],
+                ]
+            )

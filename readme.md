@@ -3,11 +3,8 @@
 This repository is still under construction and should be considered in an *alpha* state.
 
 TODO remaining before MVP:
-* [] generate payload activity schedules as CSVs and json
-* [] generate czml output for each schedule
 * [] compute orbit rev boundaries and evaluate duty-cycle per rev, rather than total interval
 * [] add sun-elevation constraint at payload boresight point (nadir point for pushbroom)
-* [] finish comments and resolve all flake8 errors
 
 Additional, non-MVP remaining tasks:
 * [] generate coverage report in CZML and in csv

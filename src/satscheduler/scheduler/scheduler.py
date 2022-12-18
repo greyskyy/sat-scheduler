@@ -1,14 +1,18 @@
 """Common scheduling functions and utilities."""
+import czml3.properties
+import czml3.types
 import logging
 import orekitfactory.time
 import typing
 
+from ..aoi.czml import aoi_czml
+from ..configuration import get_config, Configuration
 from ..preprocessor import PreprocessedAoi
-from ..utils import DefaultFactoryDict
+from ..models import SatPayloadId, Platform, SensorModel
+from ..models.czml import platform_czml, sensor_czml
+from ..utils.czml import write_czml
 
-from ..models import SatPayloadId, Platform
-from .schedule import Schedule
-from .reporting import Result
+from .core import Schedule, Result
 
 from .score import ScoredAoi
 from .solver import (
@@ -172,7 +176,65 @@ def solve(
 
 
 def write_schedule_czml(
-    platform: Platform, fname: str, schedule: Schedule, aois: typing.Sequence[PreprocessedAoi] = None
+    platform: Platform,
+    fname: str,
+    schedule: Schedule,
+    name: str = None,
+    sensor: SensorModel = None,
+    config: Configuration = None,
+    aois: typing.Sequence[PreprocessedAoi] = None,
 ):
+    """Write a schedule to CZML.
 
-    pass
+    Args:
+        platform (Platform): The schedule's platform.
+        fname (str): The filename.
+        schedule (Schedule): The schedule.
+        name (str, optional): The czml document name, if `None` the fname's basename will be used.. Defaults to None.
+        sensor (SensorModel, optional): The sensor model relevant for the schedule. Defaults to None.
+        config (Configuration, optional): The application configuration. Defaults to None.
+        aois (typing.Sequence[PreprocessedAoi], optional): The set of aois to display during the schedule. Defaults
+        to None.
+    """
+    if config is None:
+        config = get_config()
+
+    if name is None:
+        name = f"schedule/{platform.id}/{sensor.id}" if sensor else f"schedule/{platform.id}"
+
+    # build the AOI packets
+    aoi_czml_packets = []
+    for paoi in aois:
+        valid_ivls = orekitfactory.time.list_intersection(schedule.intervals, paoi.intervals)
+        if len(valid_ivls):
+            aoi_czml_packets.append(
+                aoi_czml(paoi.aoi, config=config.aois, zones=True, show=True, fill_show=valid_ivls)
+            )
+
+    # build the sensor packets
+    sensor_packets = (
+        sensor_czml(
+            platform=platform,
+            sensor=sensor,
+            show=schedule.intervals.span,
+            fill_show=schedule.intervals,
+        )
+        if sensor
+        else []
+    )
+
+    # save schedule czml
+    write_czml(
+        fname=fname,
+        name=name,
+        clock=czml3.types.IntervalValue(
+            start=config.run.start,
+            end=config.run.stop,
+            value=czml3.properties.Clock(currentTime=config.run.start, multiplier=10),
+        ),
+        packets=[
+            platform_czml(platform),
+            *sensor_packets,
+            *aoi_czml_packets,
+        ],
+    )

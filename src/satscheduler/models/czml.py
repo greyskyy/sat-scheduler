@@ -18,10 +18,26 @@ from java.util import List
 from .core import Platform
 from .sensor import SensorModel
 
+from ..utils.czml import format_boolean
+
+# Patch CZML types for various numbers
+czml3.types.TYPE_MAPPING[int] = "number"
+czml3.types.TYPE_MAPPING[float] = "number"
+
 
 def platform_czml(
     platform: Platform, earth: ReferenceEllipsoid = None, step: float | int | dt.timedelta = None
 ) -> czml3.Packet:
+    """Generate the platform czml.
+
+    Args:
+        platform (Platform): The platform.
+        earth (ReferenceEllipsoid, optional): The reference earth ellipsoid. Defaults to None.
+        step (float | int | dt.timedelta, optional): The spacing betweed data points. Defaults to None.
+
+    Returns:
+        czml3.Packet: The czml packet describing the satellite position.
+    """
     data = platform.model.data
 
     interval = orekitfactory.time.as_dateinterval(platform.ephemeris.getMinDate(), platform.ephemeris.getMaxDate())
@@ -118,6 +134,22 @@ def sensor_czml(
     show: bool | orekitfactory.time.DateIntervalList | typing.Sequence[orekitfactory.time.DateInterval] = None,
     fill_show: bool | orekitfactory.time.DateIntervalList | typing.Sequence[orekitfactory.time.DateInterval] = None,
 ) -> list[czml3.Packet]:
+    """Compute a sensor footprint on the surface of an ellipsoid.
+
+    Args:
+        platform (Platform): The satellite platform object, describes the ephemeris.
+        sensor (SensorModel): The sensor model to project.
+        attitude_mode (str, optional): The attitude mode used. Defaults to "mission".
+        earth (ReferenceEllipsoid, optional): The ellipsoid definition. Defaults to None.
+        step (float | int | dt.timedelta, optional): Step duration to use during propagation. Defaults to None.
+        show (bool | orekitfactory.time.DateIntervalList | typing.Sequence[orekitfactory.time.DateInterval], optional):
+        The value or intervals for when to show the projection outline. Defaults to None.
+        fill_show (bool | orekitfactory.time.DateIntervalList | typing.Sequence[orekitfactory.time.DateInterval],
+        optional): The value or intervals for when to fill the projection polygon. Defaults to None.
+
+    Returns:
+        list[czml3.Packet]: List of czml packets used to display the sensor projection.
+    """
     if step is None:
         step = dt.timedelta(seconds=300)
     elif isinstance(step, (float, int)):
@@ -160,6 +192,28 @@ def sensor_czml(
         p3_coords.extend((delta_secs, p3.getLongitude(), p3.getLatitude(), p3.getAltitude()))
 
         t = t.shiftedBy(step_secs)
+
+    show = format_boolean(show, span=interval)
+    fill_show = format_boolean(fill_show, span=interval)
+
+    color = czml3.properties.Color.from_str(defaults("color", "#0000FF"))
+    if fill_show:
+        polygon = czml3.properties.Polygon(
+            show=fill_show,
+            positions=czml3.properties.PositionList(
+                references=[
+                    czml3.types.ReferenceValue(string=f"footprint/{platform.id}/{sensor.id}-0#position"),
+                    czml3.types.ReferenceValue(string=f"footprint/{platform.id}/{sensor.id}-1#position"),
+                    czml3.types.ReferenceValue(string=f"footprint/{platform.id}/{sensor.id}-2#position"),
+                    czml3.types.ReferenceValue(string=f"footprint/{platform.id}/{sensor.id}-3#position"),
+                ]
+            ),
+            material=czml3.properties.Material(solidColor=czml3.properties.SolidColorMaterial(color=color)),
+            arcType=czml3.enums.ArcTypes.GEODESIC,
+            zIndex=10,
+        )
+    else:
+        polygon = None
 
     interval_czml = czml3.types.TimeInterval(start=interval.start_dt, end=interval.stop_dt)
     return [
@@ -207,23 +261,24 @@ def sensor_czml(
             id=f"footprint/{platform.id}/{sensor.id}",
             name=f"{platform.id}/{sensor.id}",
             availability=interval_czml,
-            polygon=czml3.properties.Polygon(
-                show=True,
+            polygon=polygon,
+            polyline=czml3.properties.Polyline(
                 positions=czml3.properties.PositionList(
                     references=[
                         czml3.types.ReferenceValue(string=f"footprint/{platform.id}/{sensor.id}-0#position"),
                         czml3.types.ReferenceValue(string=f"footprint/{platform.id}/{sensor.id}-1#position"),
                         czml3.types.ReferenceValue(string=f"footprint/{platform.id}/{sensor.id}-2#position"),
                         czml3.types.ReferenceValue(string=f"footprint/{platform.id}/{sensor.id}-3#position"),
+                        czml3.types.ReferenceValue(string=f"footprint/{platform.id}/{sensor.id}-0#position"),
                     ]
                 ),
                 material=czml3.properties.Material(
-                    solidColor=czml3.properties.SolidColorMaterial(
-                        color=czml3.properties.Color.from_str(defaults("color", "#0000FF"))
-                    ),
+                    polylineOutline=czml3.properties.PolylineOutlineMaterial(outlineColor=color, outlineWidth=3),
                 ),
                 arcType=czml3.enums.ArcTypes.GEODESIC,
+                clampToGround=True,
                 zIndex=10,
+                show=show,
             ),
         ),
     ]

@@ -64,7 +64,7 @@ satellites:
         imgPeriod: 22 Hz
         cols: 1024
         rows: 768
-        rowsAlongX: true #when true rows are along the paylod frame's X axis, when false they align to the Y axis
+        rowsAlongX: true # when true rows are along the paylod frame's X axis, when false they align to the Y axis
         frame:
           translation: [0., 0., 0.]
           z: [1, 0, 0]

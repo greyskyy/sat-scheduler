@@ -1,11 +1,9 @@
 """Execute the pre-processor, provide stats on results."""
 import argparse
-import math
 import czml3
 import czml3.enums
 import czml3.properties
 import czml3.types
-import datetime as dt
 import itertools
 import logging
 import pandas as pd
@@ -19,10 +17,6 @@ from ..aoi.czml import aoi_czml
 from ..configuration import get_config
 from ..models.czml import platform_czml, sensor_czml
 from ..utils.czml import write_czml
-
-# patch cml3
-czml3.types.TYPE_MAPPING[int] = "number"
-czml3.types.TYPE_MAPPING[float] = "number"
 
 SUBCOMMAND = "preprocess"
 ALIASES = ["prep"]

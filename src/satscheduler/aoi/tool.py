@@ -1,8 +1,4 @@
 """Load and visualize AOIs, mapping AOIs as HTML and/or CZML."""
-import czml3
-import czml3.enums
-import czml3.properties
-import czml3.types
 import folium
 import math
 import logging
@@ -14,7 +10,7 @@ from org.hipparchus.geometry.spherical.twod import Vertex
 
 from .aoi import Aoi, load_aois
 from .czml import aoi_czml
-from ..configuration import get_config, AoiConfiguration
+from ..configuration import get_config
 from ..utils.czml import write_czml
 
 SUBCOMMAND = "list-aois"
