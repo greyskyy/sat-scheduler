@@ -3,11 +3,14 @@ import dataclasses
 import dacite
 import enum
 import json
+import orekitfactory.factory
 import orekitfactory.time
 import typing
 import uuid
 
 from ..preprocessor import PreprocessedAoi
+from ..models import Platform
+from ..utils import DateIndexed
 
 
 def filter_aois_no_access(aois: typing.Sequence[PreprocessedAoi]) -> typing.Iterable[PreprocessedAoi]:
@@ -240,3 +243,20 @@ class ScheduleEncoder(json.JSONEncoder):
             return [[str(i.start), str(i.stop)] for i in o]
         else:
             return super().default(o)
+
+
+def build_rev_constraint_dict(platform: Platform, default_item=0) -> DateIndexed:
+    """Create the dateindexed dictionary for rev constraints.
+
+    Args:
+        platform (Platform): The platform for which rev constraints will be computed.
+        default_item (int, optional): The default constraint value. Defaults to 0.
+
+    Returns:
+        DateIndexed: The DateIndexed collection with dictionary values.
+    """
+    return DateIndexed(
+        dates=[e.date for e in platform.model.event_list if e.event == platform.model.data.rev_boundary],
+        value_type=dict,
+        default_item=default_item,
+    )

@@ -1,17 +1,35 @@
 """Misc factory methods used throughout the scheduler."""
+import dataclasses
+import datetime as dt
+import orekit.pyhelpers
 import orekitfactory.factory
 import requests
+import typing
 
 from org.hipparchus.geometry.euclidean.threed import Rotation, RotationConvention, RotationOrder
+from org.hipparchus.ode.events import Action
 from org.orekit.attitudes import AttitudeProvider, LofOffset
+from org.orekit.bodies import OneAxisEllipsoid
 from org.orekit.data import DataContext
 from org.orekit.frames import Frame, LOFType
 from org.orekit.models.earth import ReferenceEllipsoid
 from org.orekit.orbits import Orbit, OrbitType
 from org.orekit.propagation import Propagator
 from org.orekit.propagation.analytical.tle import TLE
+from org.orekit.propagation.events import EventDetector, NodeDetector, LatitudeExtremumDetector
+from org.orekit.propagation.events.handlers import PythonEventHandler
+from org.orekit.time import AbsoluteDate
 
-from ..configuration import get_config, PropagatorConfiguration, SatelliteData, AttitudeData, LofOffsetAttitudeData
+
+from ..configuration import (
+    get_config,
+    PropagatorConfiguration,
+    SatelliteData,
+    AttitudeData,
+    LofOffsetAttitudeData,
+    OrbitEventTypeData,
+)
+
 
 _REFERENCE_ELLIPSOID = None
 
@@ -160,6 +178,133 @@ def build_lof_offset_provider(
     # rotation from body -> lof; we need angles from lof -> body
     angles = rot.revert().getAngles(RotationOrder.XYZ, RotationConvention.FRAME_TRANSFORM)
     return LofOffset(inertial_frame, lof_type, RotationOrder.XYZ, angles[0], angles[1], angles[2])
+
+
+@dataclasses.dataclass(frozen=True)
+class OrbitEvent:
+    """An orbit event dataclass."""
+
+    event: OrbitEventTypeData
+    """The event type."""
+    date: AbsoluteDate
+    """The timestamp of the event."""
+
+    @property
+    def timestamp(self) -> dt.datetime:
+        """The timestamp as a python datetime object."""
+        return orekit.pyhelpers.absolutedate_to_datetime(self.date).replace(tzinfo=dt.timezone.utc)
+
+
+class OrbitEventHandler(PythonEventHandler):
+    """Event hander for orbital events."""
+
+    def __init__(self):
+        """Class constructor."""
+        super().__init__()
+        self.__results: list[OrbitEvent] = []
+
+    def get_results(self):
+        """Retrive the event list results after propagation.
+
+        Returns:
+            list[OrbitEvent]: The event list.
+        """
+        return self.__results
+
+    def init(self, initialstate, target, detector):
+        """Initialize the handler.
+
+        Args:
+            initialstate (SpacecraftState): The spacecraft state.
+            target (Any): The target.
+            detector (Any): The detector.
+        """
+        pass
+
+    def resetState(self, detector, oldState):
+        """Reset the state.
+
+        Args:
+            detector (Any): The detector.
+            oldState (Any): The old state.
+        """
+        pass
+
+    def eventOccurred(self, s, detector, increasing):
+        """Process an event.
+
+        Args:
+            s (SpacecraftState): Thg spacecraft state at time of event.
+            detector (EventDetector): The detector triggering the event.
+            increasing (bool): Whether the value is increasing or decreasing.
+
+        Returns:
+            Action: The continuation action.
+        """
+        if detector.getClass().getSimpleName() == "NodeDetector":
+            self.__results.append(
+                OrbitEvent(
+                    event=OrbitEventTypeData.ASCENDING if increasing else OrbitEventTypeData.DESCENDING,
+                    date=s.getDate(),
+                )
+            )
+        elif detector.getClass().getSimpleName() == "LatitudeExtremumDetector":
+            self.__results.append(
+                OrbitEvent(
+                    event=OrbitEventTypeData.SOUTH_POINT if increasing else OrbitEventTypeData.NORTH_POINT,
+                    date=s.getDate(),
+                )
+            )
+        else:
+            print(f"unknown detector provided {detector.getClass().getSimpleName()}")
+        return Action.CONTINUE
+
+
+def build_orbit_event_handler(
+    type: OrbitEventTypeData,
+    max_check: dt.timedelta | float = dt.timedelta(seconds=600),
+    threshold: dt.timedelta | float = dt.timedelta(microseconds=1),
+    body: OneAxisEllipsoid = None,
+    context: DataContext = None,
+) -> tuple[EventDetector, typing.Callable[[], list[OrbitEvent]]]:
+    """Compute an event handler suitable for detecting rev-crossing events.
+
+    Args:
+        type (OrbitEventTypeData): The type of event marking crossings.
+        max_check (dt.timedelta | float): The maximal checking interval. `float` values will be interpreted as seconds.
+        threshold (dt.timedelta | float): The convergence threshold. `float` values will be interpreted as seconds.
+        body (OneAxisEllipsoid, optional): The central body around which the satellite orbits. Defaults to None.
+        context (DataContext, optional): The context to use. If not provided, the default will be
+        used. Defaults to None.
+
+    Raises:
+        ValueError: When an invalid type is provided.
+    """
+    if isinstance(max_check, (int, float)):
+        max_check = dt.timedelta(seconds=max_check)
+    if isinstance(threshold, (int, float)):
+        threshold = dt.timedelta(seconds=threshold)
+
+    if body is None:
+        body = get_reference_ellipsoid(context)
+
+    if type == OrbitEventTypeData.ASCENDING or type == OrbitEventTypeData.DESCENDING:
+        detector = NodeDetector(body.getBodyFrame())
+    elif type == OrbitEventTypeData.NORTH_POINT or type == OrbitEventTypeData.SOUTH_POINT:
+        detector = LatitudeExtremumDetector(OneAxisEllipsoid.cast_(body))
+    else:
+        raise ValueError(f"Unknown orbit even type: {type}.")
+
+    handler = OrbitEventHandler()
+
+    detector = (
+        detector.withMaxCheck(max_check.total_seconds()).withThreshold(threshold.total_seconds()).withHandler(handler)
+    )
+
+    def supplier():
+        return handler.get_results()
+
+    return EventDetector.cast_(detector), supplier
 
 
 def clear_factory():

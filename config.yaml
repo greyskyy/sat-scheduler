@@ -56,6 +56,7 @@ satellites:
           z: [0., 1., 0.]  # +z_body toward velocity
     propagator:
       orbitType: cartesian
+    rev_boundary: ASCENDING
     sensors:
       - id: camera
         type: camera
@@ -70,6 +71,7 @@ satellites:
           z: [1, 0, 0]
           x: [0, 1, 0]
         useNadirPointing: false
+        duty_cycle: 0.25
 
 earth:
   model: wgs84

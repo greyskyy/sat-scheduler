@@ -31,6 +31,7 @@ def add_aois_to_solvers(
     key_type: typing.Callable[[str, str], SatPayloadId] = SatPayloadId,
     paoi_modifier: typing.Callable[[PreprocessedAoi], PreprocessedAoi] = None,
     callback: typing.Callable[[SatPayloadId, float, SolverAoi], None] = None,
+    bounds: orekitfactory.time.DateInterval = None,
 ):
     """Add the provided aois to the solvers.
 
@@ -46,6 +47,8 @@ def add_aois_to_solvers(
         callback (typing.Callable[[SatPayloadId, float, SolverAoi], None], optional): Callback triggered after
         each aoi is added to the solver. Used to perform additional configuration or add additional
         constraints. Defaults to None.
+        bounds (orekitfactory.time.DateInterval, optional): Bounding date interval. When specified, only accesses
+        intersecting this bounding interal will be added. Defaults to None.
     """
     for score, paoi in scored_aois:
         sat_model = paoi.sat
@@ -58,7 +61,7 @@ def add_aois_to_solvers(
             paoi = paoi_modifier(paoi, key)
 
         solver = solvers[key]
-        solver_aoi = add_to_solver(solver, paoi)
+        solver_aoi = add_to_solver(solver, paoi, bounds=bounds)
 
         if callback:
             callback(key, score, solver_aoi)

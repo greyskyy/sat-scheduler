@@ -3,7 +3,6 @@
 This repository is still under construction and should be considered in an *alpha* state.
 
 TODO remaining before MVP:
-* [] compute orbit rev boundaries and evaluate duty-cycle per rev, rather than total interval
 * [] add sun-elevation constraint at payload boresight point (nadir point for pushbroom)
 
 Additional, non-MVP remaining tasks:

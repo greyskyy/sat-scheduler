@@ -9,7 +9,7 @@ from ..utils import DictableDataclass, IterableDataclass
 from .satellite import SatelliteModel
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, eq=True)
 class SatPayloadId(IterableDataclass, DictableDataclass):
     """Unique key for a schedule."""
 

@@ -172,6 +172,9 @@ def preprocess(uow: UnitOfWork) -> PreprocessingResult:
     # set the propagator at the start time before we do anything else
     ephemerisInterval = uow.interval.pad(dt.timedelta(minutes=5))
 
+    # enable ephemeris event list generation
+    uow.sat.enable_event_generation()
+
     # propagate the initial period
     generator.propagate(orekitfactory.time.DateInterval(ephemerisInterval.start, uow.interval.start), uow.step)
 

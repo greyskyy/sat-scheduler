@@ -12,7 +12,7 @@ import math
 import orekitfactory.time
 import typing
 
-from .core import filter_aois_no_access, Schedule, ScheduleActivity, ScheduleEncoder
+from .core import filter_aois_no_access, Schedule, ScheduleActivity, ScheduleEncoder, build_rev_constraint_dict
 from .reporting import init_access_report, record_result, Result, record_score_and_order, record_bonusing
 from .scheduler import add_aois_to_solvers, solve, write_schedule_czml
 from .score import score_and_sort_aois, ScoredAoi
@@ -25,7 +25,7 @@ from .solver import (
 from ..configuration import get_config, Configuration
 from ..models import Platforms, SatPayloadId
 from ..preprocessor import create_uows, run_units_of_work, PreprocessingResult, PreprocessedAoi, aois_from_results
-from ..utils import positive_int, DefaultFactoryDict
+from ..utils import positive_int, DefaultFactoryDict, DateIndexed
 
 SUBCOMMAND = "pushbroom"
 ALIASES = ["pb", "schedule", "sched"]
@@ -45,10 +45,7 @@ def config_args(parser):
         help="Run with multi-threading. Overrides the value set in the config.",
     )
     parser.add_argument(
-        "--test",
-        help="Run in test-mode.",
-        action=argparse.BooleanOptionalAction,
-        default=False,
+        "--test", help="Run in test-mode.", action=argparse.BooleanOptionalAction, default=False, dest="test"
     )
 
     parser.add_argument(
@@ -116,6 +113,10 @@ def execute(args=None) -> int:
     # Execute preprocessing
     logger.info("Starting preprocessor tool.")
     uows = create_uows(args, config=config)
+
+    for uow in uows:
+        uow.sat.enable_event_generation()
+
     results: list[PreprocessingResult] = run_units_of_work(uows=uows, args=args, config=config)
     logger.info("Preprocessing complete.")
 
@@ -141,7 +142,9 @@ def execute(args=None) -> int:
     # Initialize variables to hold across batches
     keys = list(platforms.generate_ids())
     payload_intervals = {k: orekitfactory.time.DateIntervalList() for k in keys}
-    duration_limit = {k: 0.25 * (config.run.stop - config.run.start).total_seconds() for k in keys}
+    duration_limit: dict[SatPayloadId, DateIndexed] = build_duty_cycle_limits(
+        platforms=platforms, config=config, keys=keys
+    )
 
     # Schedule in batches
     for batch_start in range(0, len(scored_aois), batch_size):
@@ -156,7 +159,12 @@ def execute(args=None) -> int:
         batch_data = BatchData(config, payload_intervals, duration_limit)
 
         schedule_batch(
-            args, batch_data, scored_aois[batch_start:batch_stop], report, 1 + int(batch_start / batch_size)
+            args,
+            batch_data,
+            scored_aois[batch_start:batch_stop],
+            report,
+            1 + int(batch_start / batch_size),
+            platforms,
         )
 
     # generate schedules and record bonusing
@@ -200,29 +208,31 @@ class BatchData:
     """List of solver aois for this batch, indexed by key."""
     scores = DefaultFactoryDict(lambda x: [])
     """List of score total solver variables, indexed by key."""
-    durations = DefaultFactoryDict(lambda x: [])
+    durations: dict[SatPayloadId, DateIndexed] = {}
     """Lists of duration solver variables, indexed by key. """
     payload_intervals: dict[SatPayloadId, orekitfactory.time.DateIntervalList] = None
     """Lists of payload activity intervals, indexed by key."""
-    duration_limit: dict[SatPayloadId, float] = None
+    duration_limit: dict[SatPayloadId, DateIndexed] = None
     """Total payload time interval limits for this batch, indexed by key."""
 
     def __init__(
         self,
         config: Configuration,
         payload_intervals: dict[SatPayloadId, orekitfactory.time.DateIntervalList],
-        duration_limit: dict[SatPayloadId, float],
+        duration_limit: dict[SatPayloadId, DateIndexed],
     ):
         """Class constructor.
 
         Args:
             config (Configuration): Configuration object.
             payload_intervals (dict[SatPayloadId, orekitfactory.time.DateIntervalList]): List of payload intervals.
-            duration_limit (dict[SatPayloadId, float]): Duration limit for this batch.
+            duration_limit (dict[SatPayloadId, DateIndexedDict]): Duration limit for this batch.
         """
         self.solvers = DefaultFactoryDict(lambda x: create_solver(config=config.optimizer))
         self.payload_intervals = payload_intervals
         self.duration_limit = duration_limit
+
+        self.durations = {k: DateIndexed(dates=v.dates(), value_type=list) for k, v in duration_limit.items()}
 
     def paoi_modifer(self, paoi: PreprocessedAoi, key: SatPayloadId) -> PreprocessedAoi:
         """If the schedule already has intervals from a previous batch, remove those intervals from the AOI.
@@ -253,9 +263,11 @@ class BatchData:
         self.solver_aois[key].append(solver_aoi)
 
         # add aoi to cumulative summation constraints
-        dur = self.solvers[key].Sum(map(lambda ivl: ivl.stop - ivl.start, solver_aoi.intervals))
-        self.scores[key].append(score * dur)
-        self.durations[key].append(dur)
+        total_dur = self.solvers[key].Sum(map(lambda ivl: ivl.stop - ivl.start, solver_aoi.intervals))
+        self.scores[key].append(score * total_dur)
+
+        for ivl in solver_aoi.intervals:
+            self.durations[key][ivl.original.start_dt].append(ivl.stop - ivl.start)
 
     def cleanup(self, report=None):
         """Cleanup the batch, removing unnecessary solvers / aois.
@@ -266,7 +278,13 @@ class BatchData:
         keys = list(self.solvers.keys())
 
         for k in keys:
-            if self.duration_limit[k] <= 0:
+            zero_count = 0
+            for d in self.duration_limit[k].dates():
+                if self.duration_limit[k][[d, "duty_cycle"]] <= 0:
+                    zero_count += 1
+                    self.duration_limit[k][[d, "duty_cycle"]] = 0
+
+            if zero_count == len(self.duration_limit[k]):
                 for solver_aoi in self.solver_aois[k]:
                     if report is not None:
                         paoi: PreprocessedAoi = solver_aoi.paoi
@@ -293,19 +311,28 @@ def add_final_constraints(batch_data: BatchData):
         batch_data (BatchData): The batch data.
     """
     for k, solver in batch_data.solvers.items():
-        solver = batch_data.solvers[k]
-
         # ensure all activities are non-overlapping
         add_non_overlapping_constraints(solver, batch_data.solver_aois[k])
 
         # add total duration constraint
-        solver.Add(solver.Sum(batch_data.durations[k]) <= batch_data.duration_limit[k])
+        for d in batch_data.durations[k].dates():
+            solver.Add(
+                solver.Sum(batch_data.durations[k][d]) <= batch_data.duration_limit[k][[d, "duty_cycle"]],
+                name=f"Duty Cycle constraint key={k} date={d}",
+            )
 
         # maximize the total score
         solver.Maximize(solver.Sum(batch_data.scores[k]))
 
 
-def schedule_batch(args, batch_data: BatchData, scored_aois: typing.Sequence[ScoredAoi], report, batch_number: int):
+def schedule_batch(
+    args,
+    batch_data: BatchData,
+    scored_aois: typing.Sequence[ScoredAoi],
+    report,
+    batch_number: int,
+    platforms: Platforms,
+):
     """Schedule a single batch.
 
     Args:
@@ -314,6 +341,7 @@ def schedule_batch(args, batch_data: BatchData, scored_aois: typing.Sequence[Sco
         scored_aois (typing.Sequence[ScoredAoi]): Sequence of aois in this batch.
         report (pandas.DataFrame): Reporting dataframe.
         batch_number (int): The batch index, used for logging.
+        platforms (Platforms): The loaded platforms.
     """
     logger = logging.getLogger(__name__)
 
@@ -337,6 +365,8 @@ def schedule_batch(args, batch_data: BatchData, scored_aois: typing.Sequence[Sco
         sat_id = k.sat_id
         sensor_id = k.payload_id
 
+        platform = platforms[sat_id]
+
         result, intervals = solve(
             solver,
             report=report,
@@ -346,11 +376,84 @@ def schedule_batch(args, batch_data: BatchData, scored_aois: typing.Sequence[Sco
         )
         if result_is_successful(result):
             total = sum(map(lambda i: i.duration_secs, intervals), 0)
+
+            revs = platform.model.construct_rev_intervals(
+                bounding_interval=orekitfactory.time.as_dateinterval(
+                    platform.ephemeris.getMinDate(), platform.ephemeris.getMaxDate()
+                )
+            )
+
+            totals = DateIndexed(
+                dates=batch_data.duration_limit[k].dates(), value_type=dict, default_item=dt.timedelta()
+            )
+
+            for ivl in intervals:
+                for rev in revs:
+                    i = ivl.intersect(rev)
+                    if i is not None:
+                        mid = i.start_dt + (i.duration / 2)
+                        totals[mid, "dur"] = totals[mid, "dur"] + i.duration
+
+            for rev in revs:
+                mid = rev.start_dt + (rev.duration / 2)
+                batch_data.duration_limit[k][mid, "duty_cycle"] = (
+                    batch_data.duration_limit[k][mid, "duty_cycle"] - totals[mid, "dur"].total_seconds()
+                )
+                logger.debug(
+                    "Scheduled %s new payload activity time on rev %s - %s (%f%% remaining)",
+                    totals[mid, "dur"],
+                    rev.start.toString(),
+                    rev.stop.toString(),
+                    100.0 * batch_data.duration_limit[k][mid, "duty_cycle"] / rev.duration_secs,
+                )
+
             logger.info(
-                "Scheduled %s new payload activity time (%f secs) (%s duty cycle remaining).",
+                "Scheduled %s new payload activity time (%f secs).",
                 str(dt.timedelta(seconds=total)),
                 total,
-                str(dt.timedelta(seconds=batch_data.duration_limit[k] - total)),
             )
-            batch_data.duration_limit[k] = batch_data.duration_limit[k] - total
             batch_data.payload_intervals[k] = batch_data.payload_intervals[k] + intervals
+
+
+def build_duty_cycle_limits(
+    platforms: Platforms,
+    config: Configuration,
+    keys: typing.Sequence[SatPayloadId] = None,
+) -> dict[SatPayloadId, DateIndexed]:
+    """Construct a dictionary holding duty cycle limits, indexed by sat_id and payload_id.
+
+    Args:
+        platforms (Platforms): The platform collection.
+        config (Configuration): The overall configuration.
+        keys (typing.Sequence[SatPayloadId], optional): List of relevant keys. Defaults to None.
+        bounds (orekitfactory.time.DateInterval, optional): Time bounds in which the duty cycle applies. If None,
+        the entire run span will be used. Defaults to None.
+
+    Returns:
+        dict[SatPayloadId, float]: _description_
+    """
+    if not keys:
+        keys = platforms.generate_ids()
+
+    limits: dict[SatPayloadId, DateIndexed] = {}
+    for k in keys:
+        platform = platforms[k.sat_id]
+        sensor = platform.model.sensor(k.payload_id)
+        duty_cycle = max(0.0, min(1.0, sensor.data.duty_cycle))
+
+        if platform.model.events_generated:
+            limits[k] = build_rev_constraint_dict(platform)
+
+            for rev in platform.model.construct_rev_intervals(
+                bounding_interval=orekitfactory.time.DateInterval(
+                    platform.ephemeris.getMinDate(), platform.ephemeris.getMaxDate()
+                )
+            ):
+                mid = rev.start.shiftedBy(rev.duration_secs)
+                limits[k][[mid, "duty_cycle"]] = duty_cycle * rev.duration_secs
+        else:
+            limits[k] = DateIndexed(dates=(config.run.start, config.run.stop), value_type=dict, default_item=0)
+            mid = config.run.start + (config.run.stop - config.run.start) / 2
+            limits[k][[mid, "duty_cycle"]] = duty_cycle * (config.run.stop - config.run.start).total_seconds()
+
+    return limits

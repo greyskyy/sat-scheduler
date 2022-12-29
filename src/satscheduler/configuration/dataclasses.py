@@ -142,6 +142,28 @@ class CelestialBodyNames(enum.Enum):
         return super()._missing_(value)
 
 
+class OrbitEventTypeData(enum.Enum):
+    """Type of orbital event."""
+
+    ASCENDING = enum.auto()
+    """Point when the satellite is ascending over the equator."""
+    DESCENDING = enum.auto()
+    """Point when the satellite is descending over the equator."""
+    NORTH_POINT = enum.auto()
+    """Nothern-most point of the orbit."""
+    SOUTH_POINT = enum.auto()
+    """Southern-most point of the orbit."""
+
+    @classmethod
+    def _missing_(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            for member in cls:
+                if member.name.lower() == value.lower().replace("-", "_"):
+                    return member
+
+        return super()._missing_(value)
+
+
 @dataclass(frozen=True, kw_only=True)
 class DisplayOptions:
     """Set of display options that can be used when drawing on maps/globes."""
@@ -305,6 +327,13 @@ class SensorData:
     """Dictionary holding data used to construct the FrameData, defining the sensor frame."""
     useNadirPointing: bool
     """Whether or not to ignore the FoV and use the satellite's nadir point for inviews."""
+    duty_cycle: float = 1.0
+    """Percent of orbit that the payload can be enabled; between 0 and 1."""
+
+    def __post_init__(self):
+        """Post-creation initialization."""
+        if self.duty_cycle < 0 or self.duty_cycle > 1:
+            raise ValueError(f"Duty cycle for {self.id} must be between 0 and 1, inclusive.")
 
     @classmethod
     def create(cls, data: dict):
@@ -460,6 +489,8 @@ class SatelliteData(DisplayOptions):
     """Spacecraft mass."""
     propagator: Optional[PropagatorConfiguration]
     """Propagator configuration."""
+    rev_boundary: Optional[OrbitEventTypeData]
+    """Orbital event which indicates a rev boundary."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -582,6 +613,6 @@ DACITE_CONFIG = dacite.Config(
         astropy.coordinates.Distance: _to_distance,
         astropy.coordinates.Angle: _to_angle,
     },
-    cast=[LOFTypeData, Mass, Frequency, OrbitTypeData, CaseInsensitiveDict],
+    cast=[LOFTypeData, Mass, Frequency, OrbitTypeData, CaseInsensitiveDict, OrbitEventTypeData],
     strict=True,
 )
