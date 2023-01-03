@@ -26,3 +26,5 @@ dependencies:
     - py-rebar
     - orekit-factory
     - ortools
+    - stactools
+

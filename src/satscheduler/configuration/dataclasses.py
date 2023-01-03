@@ -329,6 +329,8 @@ class SensorData:
     """Whether or not to ignore the FoV and use the satellite's nadir point for inviews."""
     duty_cycle: float = 1.0
     """Percent of orbit that the payload can be enabled; between 0 and 1."""
+    min_sun_elevation: astropy.coordinates.Angle = None
+    """Minimum sun elevation angle."""
 
     def __post_init__(self):
         """Post-creation initialization."""

@@ -72,6 +72,7 @@ satellites:
           x: [0, 1, 0]
         useNadirPointing: false
         duty_cycle: 0.25
+        min_sun_elevation: 0 deg
 
 earth:
   model: wgs84

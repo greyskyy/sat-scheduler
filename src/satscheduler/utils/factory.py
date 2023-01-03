@@ -228,7 +228,7 @@ class OrbitEventHandler(PythonEventHandler):
             detector (Any): The detector.
             oldState (Any): The old state.
         """
-        pass
+        return oldState
 
     def eventOccurred(self, s, detector, increasing):
         """Process an event.

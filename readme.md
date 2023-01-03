@@ -1,13 +1,15 @@
 # Satellite coverage
 
-This repository is still under construction and should be considered in an *alpha* state.
+This repository is still under construction and should be considered in an *beta* state.
 
-TODO remaining before MVP:
-* [] add sun-elevation constraint at payload boresight point (nadir point for pushbroom)
+todo:
+* finish this readme
 
 Additional, non-MVP remaining tasks:
 * [] generate coverage report in CZML and in csv
 * [] adjust score to prefer non-covered areas, penalizing repeating coverage
+* [] add entrypoint for easy script use
+* [] add modularity for use as a module, rather than an application (maybe?)
 
 ## tl;dr
 

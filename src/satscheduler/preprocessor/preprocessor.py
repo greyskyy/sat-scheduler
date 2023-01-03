@@ -1,10 +1,12 @@
 """Scheduling preprocessor. Load AOI and satellite ephemeris, then compute inviews."""
+import astropy.units as u
 import logging
 import datetime as dt
 import orekit
 import orekitfactory.factory
 import orekitfactory.time
 
+from org.hipparchus.geometry.euclidean.threed import Vector3D
 from org.hipparchus.ode.events import Action
 from org.orekit.geometry.fov import FieldOfView
 from org.orekit.propagation.events import (
@@ -13,10 +15,12 @@ from org.orekit.propagation.events import (
     GeographicZoneDetector,
 )
 from org.orekit.propagation.events.handlers import PythonEventHandler
+from org.orekit.time import AbsoluteDate
 
 from ..aoi import Aoi
 from ..models import CameraSensorModel, SatelliteModel, SensorModel, Platform
-from ..utils import EphemerisGenerator
+from ..models.detectors import BoresightSunElevationDetector, IntervalBuilderEventHandler
+from ..utils import EphemerisGenerator, get_reference_ellipsoid
 
 from .core import PreprocessedAoi, PreprocessingResult, UnitOfWork
 
@@ -141,7 +145,9 @@ def _register_detector(uow: UnitOfWork, sensor: SensorModel, fov: FieldOfView, z
             log_func("building nadir-zone detector for aoi=%s, country=%s, sensor=%s", aoi.id, aoi.country, sensor.id)
             detector = GeographicZoneDetector(uow.centralBody, zone, 1.0e-6)
 
-        uow.sat.propagator.addEventDetector(detector.withHandler(handler).withMaxCheck(60.0))
+        detector = detector.withHandler(handler).withMaxCheck(60.0)
+
+        uow.sat.propagator.addEventDetector(detector)
 
     except orekit.JavaError:
         _get_logger().error(
@@ -179,11 +185,28 @@ def preprocess(uow: UnitOfWork) -> PreprocessingResult:
     generator.propagate(orekitfactory.time.DateInterval(ephemerisInterval.start, uow.interval.start), uow.step)
 
     # filter sensors if necessary and build fields of view
-    sensors = (uow.sat.sensor(id) for id in uow.sensor_ids) if uow.sensor_ids else uow.sat.sensors
+    sensors = tuple((uow.sat.sensor(id) for id in uow.sensor_ids) if uow.sensor_ids else uow.sat.sensors)
     fovs = {s.id: s.createFovInBodyFrame() for s in sensors}
 
+    sensor_constraint_handlers: dict[str:PythonEventHandler] = {}
+    for s in sensors:
+        if s.data.min_sun_elevation is not None:
+            boresight = s.sensorToBodyTxProv.getStaticTransform(AbsoluteDate.ARBITRARY_EPOCH).transformVector(
+                Vector3D.PLUS_K
+            )
+            handler = IntervalBuilderEventHandler()
+            uow.sat.propagator.addEventDetector(
+                BoresightSunElevationDetector(
+                    boresight_in_sat=boresight,
+                    body=get_reference_ellipsoid(uow.context),
+                    sun=uow.context.getCelestialBodies().getSun(),
+                    min_elevation=float(s.data.min_sun_elevation.to_value(u.rad)),
+                ).withHandler(handler)
+            )
+            sensor_constraint_handlers[s.id] = handler
+
     # register aoi detectors per sensor
-    handlers = []
+    handlers: list[AoiHandler] = []
     count = 0
     for aoi in uow.aois:
         _get_logger().debug("Building handlers for %s", aoi.id)
@@ -215,9 +238,28 @@ def preprocess(uow: UnitOfWork) -> PreprocessingResult:
     uow.sat.propagator.clearEventsDetectors()
     generator.propagate(orekitfactory.time.DateInterval(uow.interval.stop, ephemerisInterval.stop), uow.step)
 
+    constraint_intervals: dict[str, orekitfactory.time.DateIntervalList] = {
+        k: v.get_results(uow.interval) for k, v in sensor_constraint_handlers.items()
+    }
+
+    aois = []
+    for h in handlers:
+        r = h.result()
+        if r.sensor.id in constraint_intervals:
+            aois.append(
+                PreprocessedAoi(
+                    aoi=r.aoi,
+                    sat=r.sat,
+                    sensor=r.sensor,
+                    intervals=orekitfactory.time.list_intersection(r.intervals, constraint_intervals[r.sensor.id]),
+                )
+            )
+        else:
+            aois.append(r)
+
     _get_logger().info("Completed work for %s", uow.sat.id)
     return PreprocessingResult(
         platform=Platform(ephemeris=generator.build(atProv=uow.sat.getAttitudeProvider("mission")), model=uow.sat),
-        aois=tuple(h.result() for h in handlers),
+        aois=tuple(aois),
         interval=uow.interval,
     )
