@@ -3,7 +3,7 @@ import argparse
 import logging
 import yaml
 
-from .dataclasses import Configuration
+from .core import Configuration
 
 config: Configuration = None
 """Global configuration."""
@@ -28,24 +28,31 @@ def add_args(parser: argparse.ArgumentParser):
     )
 
 
-def load_config(args: argparse.Namespace):
+def load_config(args: argparse.Namespace = None, file: str = None):
     """Py-rebar post-init hook to load the configuration file.
+    
+    Either args or file must be specified.
 
     Args:
-        args (argparse.Namespace): the parsed command line arguments
+        args (argparse.Namespace, optional): the parsed command line arguments
+        file (str, optional): The configuration file path.
     """
     global raw_config
     logger = logging.getLogger(__name__)
-    if "config" in args:
-        try:
-            with open(args.config, "r") as file:
-                raw_config = yaml.safe_load(file)
-                logger.info("Loaded configuration file path=%s", args.config)
-        except BaseException:
-            logger.warn("Failed to load configuration path=%s", args.config, exc_info=1)
-            raw_config = {}
-    else:
-        logger.warn("No configuration file found in command line arguments.")
+
+    if (args is None or "config" not in args) and file is None:
+        raise ValueError("No configuration file path specified.")
+    
+    if not file and "config" in args:
+        file = args.config
+
+    try:
+        with open(args.config, "r") as file:
+            set_config(yaml.safe_load(file))
+            logger.info("Loaded configuration file path=%s", args.config)
+    except BaseException:
+        logger.warn("Failed to load configuration path=%s", args.config, exc_info=1)
+        set_config({})
 
 
 def get_config() -> Configuration:
@@ -70,3 +77,20 @@ def get_raw_config() -> dict:
     """
     global raw_config
     return raw_config
+
+
+def set_config(value: dict|Configuration):
+    """Assign the raw configuration dictionary.
+
+    Args:
+        value (dict|Configuration): The configuration data.
+    """
+    global raw_config
+    global config
+    
+    if isinstance(value, Configuration):
+        config = value
+        raw_config = None
+    else:
+        raw_config = value
+        config = None    

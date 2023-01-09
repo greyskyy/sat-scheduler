@@ -4,7 +4,7 @@ import astropy.units as u
 import collections.abc
 import datetime as dt
 import dacite
-from dataclasses import dataclass, field, asdict
+import dataclasses
 import enum
 import isodate
 import shapely.geometry
@@ -164,7 +164,7 @@ class OrbitEventTypeData(enum.Enum):
         return super()._missing_(value)
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class DisplayOptions:
     """Set of display options that can be used when drawing on maps/globes."""
 
@@ -203,10 +203,10 @@ class Dictable:
 
     def as_dict(self) -> dict:
         """Convert this class to a dictionary."""
-        return asdict(self)
+        return dataclasses.asdict(self)
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class IntervalData:
     """Data class holding a start and stop interval."""
 
@@ -216,7 +216,7 @@ class IntervalData:
     """Interval stop, as an ISO-8601 time string."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class RunData(IntervalData):
     """Data class for the run."""
 
@@ -226,7 +226,7 @@ class RunData(IntervalData):
     """Flag indicating whether to multithread processing or not."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class PriorityData:
     """Configuration data for aoi priority."""
 
@@ -238,7 +238,7 @@ class PriorityData:
     """Priority values by country name. If a country value is specified, that's the base base value."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class AoiConfiguration(DisplayOptions, Dictable):
     """Data class for AOI loading."""
 
@@ -257,7 +257,7 @@ class AoiConfiguration(DisplayOptions, Dictable):
     """Definitions of aoi priority."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class TleData:
     """Data class for TLE data."""
 
@@ -267,7 +267,7 @@ class TleData:
     """Line 2."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class KeplerianOrbitData(Dictable):
     """Data class for keplerian orbits."""
 
@@ -291,7 +291,7 @@ class KeplerianOrbitData(Dictable):
     """Frame in which the orbit is defined."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class RotationData:
     """Class describing a rotation.
 
@@ -307,7 +307,7 @@ class RotationData:
     """The frame's Z-axis, defined in the parent's frame."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class FrameData(RotationData):
     """Frame data class."""
 
@@ -315,7 +315,7 @@ class FrameData(RotationData):
     """The frame's origin, defined in the parent frame."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class SensorData:
     """Sensor data class."""
 
@@ -354,7 +354,7 @@ class SensorData:
         return dacite.from_dict(data_class=cls, data=data, config=DACITE_CONFIG)
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class CameraSensorData(SensorData):
     """Subclass of SensorData, holding data for a camera."""
 
@@ -372,7 +372,7 @@ class CameraSensorData(SensorData):
     """Flag indicating whether the rows or columns are aligned with +X_sensor."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class PropagatorConfiguration(Dictable):
     """Propagator configuration parameters."""
 
@@ -430,7 +430,7 @@ class PropagatorConfiguration(Dictable):
             return cls(**(a.as_dict() | b.as_dict()))
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class AttitudeData:
     """Attitude data class."""
 
@@ -459,7 +459,7 @@ class AttitudeData:
         return dacite.from_dict(data_class=cls, data=data, config=DACITE_CONFIG)
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class LofOffsetAttitudeData(AttitudeData):
     """An attitude described by a rotation from the Local-Orbit-Frame."""
 
@@ -467,7 +467,7 @@ class LofOffsetAttitudeData(AttitudeData):
     """The rotation from LOF to the body frame."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class SatelliteData(DisplayOptions):
     """Satellite data."""
 
@@ -479,9 +479,9 @@ class SatelliteData(DisplayOptions):
     """The orbit defined as a TLE."""
     keplerian: Optional[KeplerianOrbitData]
     """The orbit defined as a set of keplerian elements."""
-    attitudes: List[AttitudeData] = field(default_factory=list)
+    attitudes: List[AttitudeData] = dataclasses.field(default_factory=list)
     """List of attitude definitions."""
-    sensors: List[SensorData] = field(default_factory=list)
+    sensors: List[SensorData] = dataclasses.field(default_factory=list)
     """List of sensor definitions."""
     lof: LOFTypeData = LOFTypeData.QSW
     """Local orbit frame definition."""
@@ -495,7 +495,7 @@ class SatelliteData(DisplayOptions):
     """Orbital event which indicates a rev boundary."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class EarthData(Dictable):
     """Definition of the earth model."""
 
@@ -509,7 +509,7 @@ class EarthData(Dictable):
     """Boolean flag indicating whether to ignore tidal effects."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class RegionScoreData:
     """Data defining a score multiplier by geographic region."""
 
@@ -527,7 +527,7 @@ class RegionScoreData:
         object.__setattr__(self, "region", p)
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class StandardScoreData:
     """Score equation data for the standard score equation.
 
@@ -546,7 +546,7 @@ class StandardScoreData:
     """List of score multipliers by region."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class OptimizerConfiguration:
     """Dataclass for configuring the optimizer."""
 
@@ -554,7 +554,7 @@ class OptimizerConfiguration:
     """The solver type to use."""
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class Configuration:
     """Application configuration."""
 
