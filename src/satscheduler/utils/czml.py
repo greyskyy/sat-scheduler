@@ -1,6 +1,7 @@
 """CZML utilities."""
 import czml3
 import czml3.base
+import czml3.common
 import czml3.enums
 import czml3.properties
 import czml3.types
@@ -32,6 +33,33 @@ class Polygon(czml3.base.BaseCZMLObject):
     classificationType = czml3.core.attr.ib(default=None)
     zIndex = czml3.core.attr.ib(default=None)
 
+
+@czml3.core.attr.s(str=False, frozen=True, kw_only=True)
+class Position(czml3.core.BaseCZMLObject, czml3.common.Interpolatable, czml3.common.Deletable):
+    """Defines a position. The position can optionally vary over time."""
+
+    referenceFrame = czml3.core.attr.ib(default=None)
+    cartesian = czml3.core.attr.ib(default=None)
+    cartographicRadians = czml3.core.attr.ib(default=None)
+    cartographicDegrees = czml3.core.attr.ib(default=None)
+    cartesianVelocity = czml3.core.attr.ib(default=None)
+    reference = czml3.core.attr.ib(default=None)
+    interval: int | None = czml3.core.attr.ib(default=None)
+    
+    def __attrs_post_init__(self):
+        if all(
+            val is None
+            for val in (
+                self.cartesian,
+                self.cartographicDegrees,
+                self.cartographicRadians,
+                self.cartesianVelocity,
+                self.reference,
+            )
+        ):
+            raise ValueError(
+                "One of cartesian, cartographicDegrees, cartographicRadians or reference must be given"
+            )
 
 def write_czml(fname: str, packets: czml3.Packet | typing.Sequence[czml3.Packet], name: str = None, clock=None):
     """Write the czml packets to a file.

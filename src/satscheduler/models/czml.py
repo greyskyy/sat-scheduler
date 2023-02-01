@@ -18,7 +18,7 @@ from java.util import List
 from .core import Platform
 from .sensor import SensorModel
 
-from ..utils.czml import format_boolean
+from ..utils.czml import format_boolean, Position
 
 # Patch CZML types for various numbers
 czml3.types.TYPE_MAPPING[int] = "number"
@@ -106,7 +106,7 @@ def platform_czml(
         material=czml3.properties.Material(solidColor=czml3.properties.SolidColorMaterial(color=label.fillColor)),
     )
 
-    pos = czml3.properties.Position(
+    pos = Position(
         interpolationAlgorithm=czml3.enums.InterpolationAlgorithms.HERMITE,
         interpolationDegree=3,
         referenceFrame=czml3.enums.ReferenceFrames.FIXED,
@@ -219,7 +219,7 @@ def sensor_czml(
     return [
         czml3.Packet(
             id=f"footprint/{platform.id}/{sensor.id}-0",
-            position=czml3.properties.Position(
+            position=Position(
                 interpolationAlgorithm=czml3.enums.InterpolationAlgorithms.LINEAR,
                 interpolationDegree=1,
                 interval=interval_czml,
@@ -229,7 +229,7 @@ def sensor_czml(
         ),
         czml3.Packet(
             id=f"footprint/{platform.id}/{sensor.id}-1",
-            position=czml3.properties.Position(
+            position=Position(
                 interpolationAlgorithm=czml3.enums.InterpolationAlgorithms.LINEAR,
                 interpolationDegree=1,
                 interval=interval_czml,
@@ -239,7 +239,7 @@ def sensor_czml(
         ),
         czml3.Packet(
             id=f"footprint/{platform.id}/{sensor.id}-2",
-            position=czml3.properties.Position(
+            position=Position(
                 interpolationAlgorithm=czml3.enums.InterpolationAlgorithms.LINEAR,
                 interpolationDegree=1,
                 interval=interval_czml,
@@ -249,7 +249,7 @@ def sensor_czml(
         ),
         czml3.Packet(
             id=f"footprint/{platform.id}/{sensor.id}-3",
-            position=czml3.properties.Position(
+            position=Position(
                 interpolationAlgorithm=czml3.enums.InterpolationAlgorithms.LINEAR,
                 interpolationDegree=1,
                 interval=interval_czml,
