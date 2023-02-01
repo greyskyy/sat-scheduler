@@ -81,13 +81,22 @@ def aoi_czml(
         positions = _positions(aoi)
 
     if aoi.polygon.centroid.bounds:
-        position = czml3.properties.Position(
-            cartographicDegrees=[
-                aoi.polygon.centroid.coords[0][0],
-                aoi.polygon.centroid.coords[0][1],
-                1000,
-            ]
-        )
+        if aoi.polygon.centroid.coords:
+            position = czml3.properties.Position(
+                cartographicDegrees=[
+                    aoi.polygon.centroid.coords[0][0],
+                    aoi.polygon.centroid.coords[0][1],
+                    1000,
+                ]
+            )
+        else:
+            position = czml3.properties.Position(
+                cartographicDegrees=[
+                    aoi.polygon.boundary.coords[0][0],
+                    aoi.polygon.boundary.coords[0][1],
+                    1000,
+                ]
+            )
     else:
         position = None
 

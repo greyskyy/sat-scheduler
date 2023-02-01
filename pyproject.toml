@@ -38,8 +38,8 @@ dependencies = [
     "pyyaml",
     "shapely",
     "czml3",
-    "py-rebar",
-    "orekit-factory"
+    "py-rebar>=0.2.0",
+    "orekit-factory>=0.2.0"
 ]
 
 [project.urls]
@@ -68,16 +68,19 @@ filterwarnings = [
 line-length = 118
 
 [project.scripts]
-sat-scheduler = "pyrebar.__main__:run_main"
+sat-scheduler = "satscheduler.runner:run"
 
-[project.entry-points."pyrebar.preinit"]
+[project.entry-points."satscheduler.preinit"]
+orekit = "orekitfactory.hooks:pre_init"
 satsched-init = "satscheduler.initialize:pre_init"
 satsched-addargs = "satscheduler.configuration:add_args"
 
-[project.entry-points."pyrebar.postinit"]
+[project.entry-points."satscheduler.postinit"]
+orekit = "orekitfactory.hooks:post_init"
 satsched-loadconfig = "satscheduler.configuration:load_config"
 
-[project.entry-points."pyrebar.app"]
+[project.entry-points."satscheduler.app"]
+check = "satscheduler.configuration.checker"
 aoi-tool = "satscheduler.aoi.tool"
 preprocessor = "satscheduler.preprocessor.tool"
 pushbroom = "satscheduler.scheduler.pushbroom"

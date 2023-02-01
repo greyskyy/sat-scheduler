@@ -21,6 +21,12 @@ python src --help
 python src [tool] --help
 ```
 
+For example:
+
+```bash
+$ python src schedule
+```
+
 ## Scheduler overview
 
 This scheduler provides the framework into which several scheduler algorithms can be implemented.  At the high level, the workflow is as follows:

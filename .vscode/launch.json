@@ -39,7 +39,7 @@
             "program": "src/",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["pushbroom", "--test"]
+            "args": ["pushbroom"]
         }
     ]
 }

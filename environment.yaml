@@ -23,8 +23,8 @@ dependencies:
   - pytest
   - pytest-cov
   - pip:
-    - py-rebar
-    - orekit-factory
+    - py-rebar>=0.2.0
+    - orekit-factory>=0.2.0
     - ortools
     - stactools
 
